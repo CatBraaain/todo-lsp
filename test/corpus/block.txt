@@ -1,0 +1,125 @@
+===
+Simple task line
+===
+
+buy milk
+---
+
+(source_file
+  (task_line (text))
+)
+
+===
+Heading with task block
+===
+
+Archive:
+  Alt + A to move selected grayed blocks to archive @done(2024-01-01) @folding
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text) (tag (name) (arg)) (tag (name)))
+    )
+    (dedent)
+  )
+)
+
+===
+Header line without a body
+===
+
+Inbox:
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+  )
+)
+
+===
+Multiple task lines in a block
+===
+
+Shopping:
+  apples
+  oranges
+  bananas
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text))
+      (task_line (text))
+      (task_line (text))
+    )
+    (dedent)
+  )
+)
+
+===
+Nested heading blocks
+===
+
+Project:
+  Phase 1:
+    design spec
+    prototype
+  kickoff meeting
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (heading_block
+        (heading_line (text) (colon))
+        (indent)
+        (task_block
+          (task_line (text))
+          (task_line (text))
+        )
+        (dedent)
+      )
+      (task_line (text))
+    )
+    (dedent)
+  )
+)
+
+===
+Sibling heading blocks
+===
+
+List A:
+  task 1
+List B:
+  task 2
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text))
+    )
+    (dedent)
+  )
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text))
+    )
+    (dedent)
+  )
+)

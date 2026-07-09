@@ -8,7 +8,8 @@ Input is organized line by line; each line has the following elements:
 - End-of-line metadata (TAG)
 - Newline (NEWLINE)
 - Indentation state (INDENT / DEDENT)
-- Blank lines are ignored
+
+These elements are extracted by the external scanner before parsing. Blank lines are ignored.
 
 ## Rules
 
@@ -37,7 +38,7 @@ Input is organized line by line; each line has the following elements:
 - A line whose TEXT is followed by a colon becomes a HEADER_LINE; otherwise it becomes a TASK_LINE
 - TEXT may be an empty string (e.g. a line consisting of only TAGs)
 
-## Structure
+## Syntax
 
 ```
 SOURCE = TASK_BLOCK

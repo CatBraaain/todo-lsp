@@ -1,0 +1,122 @@
+===
+Single indent and dedent
+===
+
+A:
+  task
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text))
+    )
+    (dedent)
+  )
+)
+
+===
+Two levels of indent
+===
+
+A:
+  B:
+    task
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (heading_block
+        (heading_line (text) (colon))
+        (indent)
+        (task_block
+          (task_line (text))
+        )
+        (dedent)
+      )
+    )
+    (dedent)
+  )
+)
+
+===
+Dedent back to top level
+===
+
+A:
+  B:
+    task
+back to top
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (heading_block
+        (heading_line (text) (colon))
+        (indent)
+        (task_block
+          (task_line (text))
+        )
+        (dedent)
+      )
+    )
+    (dedent)
+  )
+  (task_line (text))
+)
+
+===
+Dedent to intermediate level
+===
+
+A:
+  B:
+    task
+  sibling of B
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (heading_block
+        (heading_line (text) (colon))
+        (indent)
+        (task_block
+          (task_line (text))
+        )
+        (dedent)
+      )
+      (task_line (text))
+    )
+    (dedent)
+  )
+)
+
+===
+Tab indentation
+===
+
+A:
+	task
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text))
+    )
+    (dedent)
+  )
+)

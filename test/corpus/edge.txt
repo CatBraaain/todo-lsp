@@ -1,0 +1,95 @@
+===
+Blank lines are ignored
+===
+
+task a
+
+task b
+---
+
+(source_file
+  (task_line (text))
+  (task_line (text))
+)
+
+===
+Leading blank lines
+===
+
+
+task
+---
+
+(source_file
+  (task_line (text))
+)
+
+===
+Trailing blank lines
+===
+
+task
+
+
+---
+
+(source_file
+  (task_line (text))
+)
+
+===
+Line with only tags (empty text)
+===
+
+@done
+---
+
+(source_file
+  (task_line (tag (name)))
+)
+
+===
+Header with empty text and a tag
+===
+
+: @done
+---
+
+(source_file
+  (heading_block
+    (heading_line (colon) (tag (name)))
+  )
+)
+
+===
+Colon in text body is not a header
+===
+
+time is 12:30
+---
+
+(source_file
+  (task_line (text))
+)
+
+===
+Url in text body
+===
+
+see http://example.com for details
+---
+
+(source_file
+  (task_line (text))
+)
+
+===
+Argument containing colon
+===
+
+task @time(12:30)
+---
+
+(source_file
+  (task_line (text) (tag (name) (arg)))
+)

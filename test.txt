@@ -1,0 +1,2 @@
+Archive:
+  Alt + A to move selected grayed blocks to archive @done(2024-01-01) @folding

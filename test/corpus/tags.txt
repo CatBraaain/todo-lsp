@@ -1,0 +1,111 @@
+===
+Tag without argument
+===
+
+task @done
+---
+
+(source_file
+  (task_line (text) (tag (name)))
+)
+
+===
+Tag with argument
+===
+
+task @done(2024-01-01)
+---
+
+(source_file
+  (task_line (text) (tag (name) (arg)))
+)
+
+===
+Tag with empty argument
+===
+
+task @flag()
+---
+
+(source_file
+  (task_line (text) (tag (name) (arg)))
+)
+
+===
+Multiple tags
+===
+
+task @done(2024-01-01) @folding @priority(high)
+---
+
+(source_file
+  (task_line
+    (text)
+    (tag (name) (arg))
+    (tag (name))
+    (tag (name) (arg))
+  )
+)
+
+===
+Tag on heading line
+===
+
+List: @collapsed
+  item one
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon) (tag (name)))
+    (indent)
+    (task_block
+      (task_line (text))
+    )
+    (dedent)
+  )
+)
+
+===
+At sign in text body
+===
+
+email me at user@example.com @done
+---
+
+(source_file
+  (task_line (text) (tag (name)))
+)
+
+===
+Argument with url
+===
+
+task @link(http://example.com/path?q=1)
+---
+
+(source_file
+  (task_line (text) (tag (name) (arg)))
+)
+
+===
+Argument with spaces
+===
+
+task @note(remember to follow up tomorrow)
+---
+
+(source_file
+  (task_line (text) (tag (name) (arg)))
+)
+
+===
+Argument containing at sign
+===
+
+task @ref(@other)
+---
+
+(source_file
+  (task_line (text) (tag (name) (arg)))
+)
