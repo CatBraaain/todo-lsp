@@ -1,0 +1,18 @@
+[package]
+name = "todo-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "todo-lsp"
+path = "src/main.rs"
+
+[dependencies]
+tower-lsp-server = "0.23"
+tokio = { version = "1", features = ["full"] }
+tree-sitter = { workspace = true }
+tree-sitter-todo = { workspace = true }
+serde_json = "1"
+anyhow = "1"

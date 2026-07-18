@@ -2,24 +2,33 @@
 
 ## 進捗状況（再開用）
 
-| Phase | 内容                                 | 状態                                      |
-| ----- | ------------------------------------ | ----------------------------------------- |
-| 0     | grammar 安定化（メモリ爆発修正）     | ✅ 完了（commit `60f7e85`）               |
-| 1     | レイアウト移行（git mv）             | ⏳ 未着手（一度実施 → ロールバック済み）  |
-| 2     | workspace ルート Cargo.toml          | ⏳ 未着手（一度実施 → ロールバック済み）  |
-| 3     | todo-lsp 雛形（FULL sync + did\_\*） | ⏳ 未着手                                 |
-| 4     | diagnostics 実装                     | ⏳ 未着手                                 |
-| 5     | documentSymbol 実装                  | ⏳ 未着手                                 |
-| 6     | foldingRange 実装                    | ⏳ 未着手                                 |
-| 7     | vscode-todo 拡張の雛形               | ⏳ 未着手                                 |
-| 8     | バイナリ起動 E2E                     | ⏳ 未着手                                 |
-| 9     | E2E 検証と vsix パッケージ           | ⏳ 未着手                                 |
+| Phase | 内容                                 | 状態                                                      |
+| ----- | ------------------------------------ | --------------------------------------------------------- |
+| 0     | grammar 安定化（メモリ爆発修正）     | ✅ 完了（commit `60f7e85`）                               |
+| 1     | レイアウト移行（git mv）             | ✅ 完了（commit `2097e7d`）                               |
+| 2     | workspace ルート Cargo.toml          | ✅ 完了（未コミット）                                     |
+| 3     | todo-lsp 雛形（FULL sync + did\_\*） | ✅ 完了（initialize 応答確認済み）                        |
+| 4     | diagnostics 実装                     | ✅ 完了                                                   |
+| 5     | documentSymbol 実装                  | ✅ 完了                                                   |
+| 6     | foldingRange 実装                    | ✅ 完了                                                   |
+| 7     | vscode-todo 拡張の雛形               | ✅ 完了（npm install + build、tsc クリーン）              |
+| 8     | バイナリ起動 E2E                     | ⏳ LSP stdio smoke 成功 / F5 デバッグは Windows 必要      |
+| 9     | E2E 検証と vsix パッケージ           | ⏳ Windows 環境で実施（`todo-lsp.exe` が必要）            |
 
 ### ここまでの作業ログ
 
 - **2026-07-11 ロールバック**: Phase 1/2 を一度実施したが、その後 `cargo test --workspace` を走らせたところ tree-sitter 側でメモリ爆発が発生。Phase 1/2 の成果物（`git mv` による `tree-sitter-todo/` への移行、workspace ルート `Cargo.toml`/`Cargo.lock`）を全て git で戻し、単一クレート構成に復帰した。
 - **Phase 0 完了（commit `60f7e85`）**: メモリ爆発の原因は grammar 側。`source_file` の先頭が `seq(repeat($._newline), ...)` になっており、external scanner トークン `_newline` を先頭で無限に消費できることが parser 生成時の GLR 状態爆発を引き起こしていた。`repeat($._newline)` → `optional($._newline)` に変更し `src/parser.c`/`src/grammar.json` を再生成。`cargo test` が正常終了するようになった。
-- **現在の状態**: ルートは単一 `tree-sitter-todo` クレート（workspace 未構築、`members` 無し）。`tree-sitter-todo/`・`vscode-todo/` は空ディレクトリのみ残存（ロールバックの残骸）。`docs/`（本計画書）は未コミット。Phase 1 はこの空ディレクトリを削除した上で `git mv` をやり直すところから再開。
+- **現在の状態（2026-07-18 更新）**: モノレポ完成（workspace = `tree-sitter-todo` + `todo-lsp`、`vscode-todo` 拡張）。`todo-lsp` は diagnostics + documentSymbol + foldingRange を提供し、stdio smoke で応答確認済み（ネストシンボル・3つの REGION 折りたたみ・妥当入力で診断空）。残作業は Windows 環境での F5 デバッグと vsix パッケージ（`todo-lsp.exe` をクロスビルド or Windows ビルドして `vscode-todo/bin/win32-x64/` へ配置）。全成果物は未コミット。
+
+### 2026-07-18 作业ログ（Phase 1〜8 smoke）
+
+- **Phase 1 再完了（commit `2097e7d`）**: ロールバック残骸の空ディレクトリを削除し、grammar 関連ファイルを `tree-sitter-todo/` へ再移行。`cargo test` が通ることを確認（メモリ爆発の再発なし）。
+- **Phase 2 完了**: ルート `Cargo.toml`（workspace + `members=["tree-sitter-todo"]` + workspace.package/dependencies）を作成。`Cargo.lock` を `tree-sitter-todo/` からルートへ集約。`cargo test --workspace` green（tree-sitter 0.26.10 に解決）。
+- **Phase 3 完了**: `todo-lsp/` クレート雛形（main/parse/lsp/analysis）。`tower-lsp-server 0.23` の API をレジストリソース直読みで確定 — **`ls_types`**（`lsp_types` でなく。`ls-types 0.0.6` の再エクスポート）、**native async fn in trait**（`#[async_trait]` 不要）、**`InitializeResult.offset_encoding` 必須**（`Option<String>`、`"utf-8"` を設定し tree-sitter の byte column を正とする）、`TextDocumentSyncKind::FULL`（newtype struct + 大文字 const）、`Uri` は `Eq+Hash` で HashMap キー化可。initialize 応答確認済み。
+- **Phase 4-6 完了**: `analysis.rs` の3関数（diagnostics/document_symbols/folding_ranges）。indent/dedent スキップ、`task_block` 経由のネスト再帰、`task_block.end_position().row - 1` で `task_line` の末尾 `_newline` 分を補正。壊れフィクスチャは `@done(`（text なしなら回復不可で ERROR 生成; `task @broken(` は text が回復して ERROR にならず不採用）。単体テスト4つ green、warning なし。
+- **Phase 7 完了**: `vscode-todo/` 拡張雛形。**tmLanguage.yaml が存在しなかった**ため最小の `todo.tmLanguage.json` を新規作成（見出し/コメント/タグ）。`vscode-languageclient 9.x` は `client.start()` が `Promise<void>` を返すため `subscriptions.push(client)` + `client.start()` パターン。npm install + esbuild build 成功、`tsc --noEmit` クリーン。justfile 拡張（build-lsp/copy-binary/build-ext/package/test/dev/generate/test-grammar）。
+- **Phase 8（LSP stdio smoke）成功**: todo-lsp バイナリに `initialize→initialized→didOpen→documentSymbol→foldingRange→shutdown` を投入（initialized は initialize 応答後に送る、一気送信だと tower-lsp-server が initialize を Cancel する）。`publishDiagnostics`（妥当なら空）、ネストした `DocumentSymbol`（Inbox/Project/Archive + タスク、MODULE/STRING）、`foldingRange`（3つの REGION）が全て期待通り。**F5 デバッグと vsix 実証は Windows 環境で残作業**。
 
 ## Context
 

@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["tree-sitter-todo", "todo-lsp"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+
+[workspace.dependencies]
+tree-sitter = "0.26.9"
+tree-sitter-language = "0.1"
+tree-sitter-todo = { path = "tree-sitter-todo" }

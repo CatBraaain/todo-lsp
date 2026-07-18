@@ -1,0 +1,46 @@
+{
+  "name": "todo",
+  "displayName": "Todo",
+  "description": "Language support for .todo files (highlight, outline, folding, diagnostics)",
+  "version": "0.1.0",
+  "publisher": "todo-lsp",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onLanguage:todo"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "todo",
+        "aliases": ["Todo"],
+        "extensions": [".todo"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "todo",
+        "scopeName": "text.todo",
+        "path": "./syntaxes/todo.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "package": "vsce package",
+    "vscode:prepublish": "node esbuild.js --production"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.4.0"
+  }
+}
