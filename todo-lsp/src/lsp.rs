@@ -33,6 +33,15 @@ impl LanguageServer for Backend {
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensOptions {
+                        legend: analysis::semantic_tokens_legend(),
+                        full: Some(SemanticTokensFullOptions::Bool(true)),
+                        range: None,
+                        work_done_progress_options: WorkDoneProgressOptions::default(),
+                    }
+                    .into(),
+                ),
                 ..Default::default()
             },
             offset_encoding: Some("utf-8".to_string()),
@@ -134,5 +143,25 @@ impl LanguageServer for Backend {
                 analysis::folding_ranges(root, source)
             });
         Ok(ranges)
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+        let tokens = self
+            .documents
+            .lock()
+            .unwrap()
+            .get(&uri)
+            .map(|document| {
+                let root = document.tree.root_node();
+                let source = document.text.as_bytes();
+                analysis::semantic_tokens(root, source)
+            });
+        Ok(tokens
+            .map(|data| SemanticTokens { result_id: None, data })
+            .map(SemanticTokensResult::from))
     }
 }
