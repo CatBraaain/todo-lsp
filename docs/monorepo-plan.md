@@ -74,8 +74,7 @@ todo-lsp/                                 (リポジトリルート)
 ├── README.md  LICENSE                    (新規・最小)
 ├── tree-sitter-todo/                     (grammar クレート。中身はそのまま)
 │   ├── Cargo.toml  grammar.js  GRAMMAR.md  tree-sitter.json
-│   ├── src/  queries/  bindings/rust/  test/corpus/
-│   └── tools/  (Dockerfile, ts-docker.sh — Docker 生成フローはここに残留)
+│   └── src/  queries/  bindings/rust/  test/corpus/
 ├── todo-lsp/                             (新規: LSP server バイナリ)
 │   ├── Cargo.toml
 │   └── src/  (main.rs, lsp.rs, parse.rs, analysis.rs)
@@ -194,7 +193,7 @@ anyhow = "1"
 
 ## 4. ビルド統合（ルート justfile）
 
-既存の `_`/`prepare` を残し、以下を追加（プロジェクトは bash 使用のため Git Bash で動作）:
+既存の `_`/`update-grammar-types`（旧 `prepare`）を残し、以下を追加（プロジェクトは bash 使用のため Git Bash で動作）:
 
 ```make
 build-lsp:
@@ -214,18 +213,18 @@ dev:
     cp target/debug/todo-lsp.exe vscode-todo/bin/win32-x64/todo-lsp.exe
     cd vscode-todo && npm run build
 generate:
-    cd tree-sitter-todo && bash tools/ts-docker.sh generate
+    cd tree-sitter-todo && tree-sitter generate
 test-grammar:
-    cd tree-sitter-todo && bash tools/ts-docker.sh test
+    cd tree-sitter-todo && tree-sitter test
 ```
 
-Docker 生成フローは `tree-sitter-todo/` 内に残留。
+tree-sitter CLI は WSL ネイティブで直接実行（Docker 廃止、メモリ爆発は grammar 側 commit `60f7e85` で解決済み）。
 
 ---
 
 ## 5. 残りの実装フェーズ順（Phase 1〜9）
 
-1. **レイアウト移行（やり直し）** — ロールバック残骸の空 `tree-sitter-todo/`・`vscode-todo/` を削除してから、改めて `git mv` で grammar 関連（`grammar.js`, `grammar.d.ts`, `GRAMMAR.md`, `tree-sitter.json`, `Cargo.toml`, `src/`, `queries/`, `bindings/`, `test/`, `tools/`, `test.txt`）を `tree-sitter-todo/` へ。ルートに `README.md`/`LICENSE` 追加。**完了後すぐ `cargo test` が通ることを確認**（メモリ爆発の再発検知）。
+1. **レイアウト移行（やり直し）** — ロールバック残骸の空 `tree-sitter-todo/`・`vscode-todo/` を削除してから、改めて `git mv` で grammar 関連（`grammar.js`, `grammar.d.ts`, `GRAMMAR.md`, `tree-sitter.json`, `Cargo.toml`, `src/`, `queries/`, `bindings/`, `test/`, `test.txt`）を `tree-sitter-todo/` へ。ルートに `README.md`/`LICENSE` 追加。**完了後すぐ `cargo test` が通ることを確認**（メモリ爆発の再発検知）。
 2. **workspace ルート Cargo.toml（やり直し）** — workspace + `members = ["tree-sitter-todo"]` + workspace.package/dependencies。`Cargo.lock` 再生成。`cargo check --workspace` 通過を確認。Phase 3 で `todo-lsp` を `members` に追加。
 3. **todo-lsp 雛形** — `Cargo.toml`, `main.rs`, `parse.rs`, `lsp.rs`（FULL sync + symbol/folding provider 宣言、did\_\* 実装、analysis は空スタブ）。workspace の `members` に `todo-lsp` を追加。確認: `cargo build -p todo-lsp`、バイナリに `initialize`/`initialized` を stdin 投入し応答確認。
 4. **diagnostics** — ERROR/MISSING 走査。壊れフィクスチャで単体テスト。
@@ -239,7 +238,7 @@ Docker 生成フローは `tree-sitter-todo/` 内に残留。
 
 ## 6. 検証（Windows で E2E）
 
-1. **grammar 回帰**: `cargo test --workspace` と `bash tools/ts-docker.sh test`。corpus 4ファイルが green のまま。
+1. **grammar 回帰**: `cargo test --workspace` と `tree-sitter test`。corpus 4ファイルが green のまま。
 2. **LSP バイナリ stdio スモーク**: `cargo build -p todo-lsp` 後、Content-Length フレームの JSON-RPC を stdin に投入 — `initialize`（`textDocumentSync=FULL`, `documentSymbolProvider`, `foldingRangeProvider` を確認）→ `initialized` → `didOpen`（サンプル）→ `publishDiagnostics`（妥当なら空）→ `documentSymbol`（ネスト）→ `foldingRange`（範囲）→ `shutdown`/`exit`。
 3. **拡張開発ホスト**: F5 → `sample.todo` を開き、Outline にヘッダ/タスク階層、折りたたみチエブロン、壊れ行に赤波線を確認。
 
