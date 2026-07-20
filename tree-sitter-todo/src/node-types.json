@@ -160,11 +160,6 @@
     "named": true
   },
   {
-    "type": "comment",
-    "named": true,
-    "extra": true
-  },
-  {
     "type": "dedent",
     "named": true
   },

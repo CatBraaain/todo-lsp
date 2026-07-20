@@ -3,7 +3,12 @@
 
 export default grammar({
   name: "todo",
-  extras: ($) => [$.comment, /[ \t]/],
+  // `#` is NOT a comment in this language: a `#`-prefixed line is a normal
+  // task whose text happens to start with `#`. The external scanner consumes
+  // the whole line (including any leading `#`) as a single `text` token, so
+  // no comment node is ever produced. See GRAMMAR.md and parse.rs test
+  // `hash_line_is_task_text`.
+  extras: () => [/[ \t]/],
   externals: ($) => [$._newline, $.indent, $.dedent, $.text],
   rules: {
     source_file: ($) => seq(optional($._newline), repeat(choice($.heading_block, $.task_line))),
@@ -30,7 +35,5 @@ export default grammar({
     tag: ($) => seq("@", field("name", $.name), optional(field("arg", $.arg))),
     name: () => token(/[^\s(]+/),
     arg: () => token(seq("(", /[^)]*/, ")")),
-
-    comment: () => token(seq("#", /[^\n]*/)),
   },
 });

@@ -5,6 +5,3 @@
 
 ; Tags
 (tag) @tag
-
-; Comments
-(comment) @comment

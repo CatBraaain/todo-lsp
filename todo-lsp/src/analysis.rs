@@ -27,7 +27,7 @@ fn symbol_from_node(node: &Node, source: &[u8]) -> Option<DocumentSymbol> {
     match node.kind() {
         "heading_block" => Some(symbol_from_heading_block(node, source)),
         "task_line" => Some(symbol_from_task_line(node, source)),
-        // indent, dedent, task_block (handled by its parent), comment (extra) -> skip
+        // indent, dedent, task_block (handled by its parent) -> skip
         _ => None,
     }
 }
@@ -173,36 +173,57 @@ fn folding_range_for_heading(node: &Node) -> Option<FoldingRange> {
     })
 }
 
-/// Build diagnostics: walk the tree and turn `is_error()` / `is_missing()`
-/// nodes into `Diagnostic`s (severity ERROR, source "todo"). Children of an
-/// error node are skipped to avoid noisy duplicate ranges.
+/// Build diagnostics by walking the tree (severity ERROR, source "todo").
+///
+/// tree-sitter 0.26 does not expose MISSING nodes through `Node::child()` /
+/// `child_count()` / `TreeCursor` — they appear only in `to_sexp()`. So a
+/// `has_error()`-based walk is used instead: `has_error()` is set for both
+/// ERROR and MISSING and aggregates up the subtree.
+///
+/// For each node that `has_error()` and is not itself an ERROR node, if none
+/// of its traversable children `has_error()`, a non-traversable MISSING node
+/// hides directly beneath it — its range is reported as "missing syntax
+/// element". Direct ERROR nodes report "syntax error"; their children are
+/// skipped to avoid noisy duplicate ranges.
 pub fn diagnostics(root: Node) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    if !root.has_error() {
+        return out;
+    }
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
-        if node.is_error() || node.is_missing() {
-            out.push(diagnostic_for_node(&node));
+        if !node.has_error() {
             continue;
         }
+        if node.is_error() {
+            out.push(make_diagnostic(range_from_node(&node), "syntax error"));
+            continue;
+        }
+        // `node.has_error()` && !`node.is_error()`: descend into traversable
+        // children that still carry an error. If none do, a non-traversable
+        // MISSING node sits directly under this node.
+        let mut descended = false;
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i as u32) {
-                stack.push(child);
+                if child.has_error() {
+                    descended = true;
+                    stack.push(child);
+                }
             }
+        }
+        if !descended {
+            out.push(make_diagnostic(range_from_node(&node), "missing syntax element"));
         }
     }
     out
 }
 
-fn diagnostic_for_node(node: &Node) -> Diagnostic {
+fn make_diagnostic(range: Range, message: &str) -> Diagnostic {
     Diagnostic {
-        range: range_from_node(node),
+        range,
         severity: Some(DiagnosticSeverity::ERROR),
         source: Some("todo".to_string()),
-        message: if node.is_missing() {
-            "missing syntax element".to_string()
-        } else {
-            "syntax error".to_string()
-        },
+        message: message.to_string(),
         ..Default::default()
     }
 }
@@ -259,12 +280,9 @@ pub fn semantic_tokens_legend() -> SemanticTokensLegend {
 }
 
 /// Build semantic tokens by running the highlight query and delta-encoding
-/// the captures. `@comment` is intentionally absent from the legend (the
-/// grammar's `comment` rule is dormant — see parse.rs test
-/// `hash_line_is_treated_as_task_not_comment`), so any comment capture is
-/// skipped via the catch-all arm. Keeping `@comment` out of the legend is
-/// deliberate: it forces an explicit legend update when the comment bug is
-/// eventually fixed, making the intent visible at that commit.
+/// the captures. The legend carries only `heading` and `tag` (the two
+/// captures highlights.scm emits); the catch-all arm skips any other
+/// capture.
 pub fn semantic_tokens(root: Node, source: &[u8]) -> Vec<SemanticToken> {
     let query = highlights_query();
     let heading_cap = query
@@ -284,7 +302,7 @@ pub fn semantic_tokens(root: Node, source: &[u8]) -> Vec<SemanticToken> {
         let type_idx = match cap.index {
             i if i == heading_cap => 0,
             i if i == tag_cap => 1,
-            _ => continue, // @comment and any capture not in the legend
+            _ => continue, // any capture not in the legend
         };
         let start = cap.node.start_position();
         let start_byte = cap.node.start_byte();
@@ -753,12 +771,11 @@ Archive:
 
     #[test]
     fn diagnostics_messages_in_allowed_set() {
-        // Note: `diagnostics()` currently only surfaces ERROR nodes — tree-sitter
-        // MISSING nodes are not reachable through `Node::child()`, so the
-        // "missing syntax element" branch is effectively dormant. Both inputs
-        // here produce ERROR nodes. We still assert the allowed message set so
-        // the test stays correct if MISSING detection is ever wired up.
-        for input in ["@done(", "task\n  @done("] {
+        // The walk surfaces both ERROR nodes ("syntax error") and
+        // non-traversable MISSING descendants ("missing syntax element").
+        // `@done(` and the indented variant yield ERROR nodes; the
+        // heading-indented form yields a MISSING _newline.
+        for input in ["@done(", "task\n  @done(", "Project:\n  @done("] {
             let diags = diags_of(input);
             assert!(!diags.is_empty(), "expected diagnostics for {input:?}");
             for d in &diags {
@@ -769,6 +786,26 @@ Archive:
                 );
             }
         }
+    }
+
+    #[test]
+    fn diagnostics_missing_newline_after_tag_is_detected() {
+        // `@done(` indented under a heading: tree-sitter inserts a
+        // non-traversable MISSING _newline (the required newline after the
+        // tag is absent at EOF). The has_error()-based walk surfaces it as
+        // "missing syntax element" at the enclosing task_line's range (row 1).
+        let diags = diags_of("Project:\n  @done(");
+        assert!(!diags.is_empty(), "MISSING _newline must produce a diagnostic");
+        assert!(
+            diags.iter().any(|d| d.message == "missing syntax element"),
+            "expected a missing-element diagnostic, got {diags:?}"
+        );
+        assert!(diags.iter().all(|d| d.severity == Some(DiagnosticSeverity::ERROR)));
+        assert!(diags.iter().all(|d| d.source.as_deref() == Some("todo")));
+        assert!(
+            diags.iter().all(|d| d.range.start.line == 1),
+            "diagnostic must sit on the indented line, got {diags:?}"
+        );
     }
 
     #[test]
@@ -878,12 +915,11 @@ Archive:
     }
 
     #[test]
-    fn semantic_tokens_hash_line_does_not_produce_comment() {
-        // Pins the known grammar bug: `# foo` parses as a task_line, not a
-        // comment node. highlights.scm has `(comment) @comment`, but since no
-        // comment node is produced it never matches, and @comment is absent
-        // from the legend anyway. Result: zero tokens.
+    fn semantic_tokens_hash_line_emits_no_token() {
+        // A `#`-prefixed line is a task_line with only a text child. No query
+        // capture matches (highlights.scm captures heading_line and tag only),
+        // so zero semantic tokens are emitted.
         let tokens = semantic_tokens_of("# just a note\n");
-        assert!(tokens.is_empty(), "comment capture is dormant; got {tokens:?}");
+        assert!(tokens.is_empty(), "got {tokens:?}");
     }
 }

@@ -75,11 +75,11 @@ mod tests {
     }
 
     #[test]
-    fn hash_line_is_treated_as_task_not_comment() {
-        // NOTE: the grammar declares a `comment` extra (`# ...`), but the
-        // external scanner that produces `text` consumes the whole line,
-        // including the leading `#`. So a `#`-prefixed line parses as a
-        // `task_line`, not as a comment. This pins the current behavior.
+    fn hash_line_is_task_text() {
+        // `#` is not a comment in this language: the external scanner that
+        // produces `text` consumes the whole line, including any leading `#`.
+        // So a `#`-prefixed line parses as a `task_line` whose text starts
+        // with `#`. See GRAMMAR.md and the comment on `extras` in grammar.js.
         let input = "# just a note\n";
         assert!(!has_error(input));
         assert_eq!(named_child_count(input), 1);

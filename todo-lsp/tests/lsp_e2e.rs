@@ -312,9 +312,9 @@ fn full_handshake_with_clean_sample() {
 }
 
 /// An unclosed tag with no preceding text yields an ERROR node, so the server
-/// must publish at least one ERROR-severity diagnostic. This also pins the
-/// current diagnostics behavior: MISSING nodes are NOT surfaced (the branch is
-/// dormant); only ERROR nodes are reported.
+/// must publish at least one ERROR-severity diagnostic. Both ERROR nodes and
+/// non-traversable MISSING descendants are reported as ERROR-severity
+/// diagnostics (see `analysis::diagnostics`).
 #[test]
 fn broken_input_publishes_error_diagnostics() {
     let mut s = LspSession::spawn();

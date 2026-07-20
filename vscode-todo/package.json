@@ -16,8 +16,7 @@
       {
         "id": "todo",
         "aliases": ["Todo"],
-        "extensions": [".todo"],
-        "configuration": "./language-configuration.json"
+        "extensions": [".todo"]
       }
     ],
     "grammars": [

@@ -10,7 +10,6 @@
           "match": "^(\\s*)([^:\\n]+?):\\s*$",
           "name": "entity.name.section.todo"
         },
-        { "match": "#.*$", "name": "comment.line.number-sign.todo" },
         {
           "comment": "Tag with optional parenthesized argument",
           "match": "@[A-Za-z][\\w-]*(?:\\([^)]*\\))?",
