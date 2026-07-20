@@ -7,22 +7,30 @@ prod:
   cargo build --release -p todo-lsp
   mkdir -p vscode-todo/bin/win32-x64
   cp target/release/todo-lsp.exe vscode-todo/bin/win32-x64/todo-lsp.exe
-  cd vscode-todo && npm install && npm run build
+  just build-vscode
 
 dev:
   cargo build -p todo-lsp
   mkdir -p vscode-todo/bin/win32-x64
   cp target/debug/todo-lsp.exe vscode-todo/bin/win32-x64/todo-lsp.exe
-  cd vscode-todo && npm install && npm run build
+  just build-vscode
+
+[working-directory("vscode-todo")]
+build-vscode:
+  npm install
+  npm run build
 
 test:
   cargo test --workspace
 
-generate:
-  cd tree-sitter-todo && tree-sitter generate
+[working-directory("tree-sitter-todo")]
+generate-grammar:
+  tree-sitter generate
 
+[working-directory("tree-sitter-todo")]
 test-grammar:
-  cd tree-sitter-todo && tree-sitter test
+  tree-sitter test
 
+[working-directory("tree-sitter-todo")]
 update-grammar-types:
-  cd tree-sitter-todo && curl -L {{tree_sitter_dsl_def_path}} -o grammar.d.ts
+  curl -L {{tree_sitter_dsl_def_path}} -o grammar.d.ts
