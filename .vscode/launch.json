@@ -5,7 +5,10 @@
       "name": "Run Extension",
       "type": "extensionHost",
       "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode-todo"],
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-todo",
+        "${workspaceFolder}/vscode-todo/test"
+      ],
       "outFiles": ["${workspaceFolder}/vscode-todo/dist/**/*.js"]
     }
   ]
