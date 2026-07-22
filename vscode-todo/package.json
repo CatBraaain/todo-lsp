@@ -8,22 +8,23 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Programming Languages"],
+  "categories": [
+    "Programming Languages"
+  ],
   "main": "./dist/extension.js",
-  "activationEvents": ["onLanguage:todo"],
+  "activationEvents": [
+    "onLanguage:todo"
+  ],
   "contributes": {
     "languages": [
       {
         "id": "todo",
-        "aliases": ["Todo"],
-        "extensions": [".todo"]
-      }
-    ],
-    "grammars": [
-      {
-        "language": "todo",
-        "scopeName": "text.todo",
-        "path": "./syntaxes/todo.tmLanguage.json"
+        "aliases": [
+          "Todo"
+        ],
+        "extensions": [
+          ".todo"
+        ]
       }
     ]
   },
