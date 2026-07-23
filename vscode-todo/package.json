@@ -26,6 +26,24 @@
           ".todo"
         ]
       }
+    ],
+    "configurationDefaults": {
+      "[todo]": {
+        "editor.semanticHighlighting.enabled": true
+      }
+    },
+    "semanticTokenScopes": [
+      {
+        "language": "todo",
+        "scopes": {
+          "type": [
+            "entity.name.section.todo"
+          ],
+          "decorator": [
+            "string.tag.todo"
+          ]
+        }
+      }
     ]
   },
   "scripts": {
