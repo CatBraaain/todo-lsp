@@ -48,3 +48,4 @@ zig-out/
 *.jar
 
 .vscode-todo-language/*
+bin

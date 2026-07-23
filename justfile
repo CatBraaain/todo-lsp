@@ -1,18 +1,21 @@
 tree_sitter_dsl_def_path := "https://raw.githubusercontent.com/tree-sitter/tree-sitter/master/crates/cli/npm/dsl.d.ts"
 
+bin_dir := if os() == "windows" { "win32-x64" } else { "linux-x64" }
+bin_ext := if os() == "windows" { ".exe" } else { "" }
+
 _:
   @just --list --unsorted
 
 prod:
   cargo build --release -p todo-lsp
-  mkdir -p vscode-todo/bin/win32-x64
-  cp target/release/todo-lsp.exe vscode-todo/bin/win32-x64/todo-lsp.exe
+  mkdir -p vscode-todo/bin/{{bin_dir}}
+  cp target/release/todo-lsp{{bin_ext}} vscode-todo/bin/{{bin_dir}}/todo-lsp{{bin_ext}}
   just build-vscode
 
 dev:
   cargo build -p todo-lsp
-  mkdir -p vscode-todo/bin/win32-x64
-  cp target/debug/todo-lsp.exe vscode-todo/bin/win32-x64/todo-lsp.exe
+  mkdir -p vscode-todo/bin/{{bin_dir}}
+  cp target/debug/todo-lsp{{bin_ext}} vscode-todo/bin/{{bin_dir}}/todo-lsp{{bin_ext}}
   just build-vscode
 
 [working-directory("vscode-todo")]
