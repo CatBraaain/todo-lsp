@@ -1,7 +1,7 @@
 {
   "name": "todo",
   "displayName": "Todo",
-  "description": "Language support for .todo files (highlight, outline, folding, diagnostics)",
+  "description": "Language support for .todo / .tasks files (highlight, outline, folding, diagnostics, commands, formatting, archive, repeat)",
   "version": "0.1.0",
   "publisher": "todo-lsp",
   "license": "MIT",
@@ -20,34 +20,234 @@
       {
         "id": "todo",
         "aliases": [
-          "Todo"
+          "Todo",
+          "Tasks"
         ],
         "extensions": [
-          ".todo"
-        ]
+          ".todo",
+          ".tasks"
+        ],
+        "configuration": "./language-configuration.json"
       }
     ],
-    "configurationDefaults": {
-      "[todo]": {
-        "editor.semanticHighlighting.enabled": true
-      }
-    },
-    "semanticTokenScopes": [
+    "commands": [
       {
-        "language": "todo",
-        "scopes": {
-          "type": [
-            "entity.name.section.todo"
-          ],
-          "decorator": [
-            "string.tag.todo"
-          ]
+        "command": "todo-language.toggleDone",
+        "title": "Toggle Line Done",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.toggleCancelled",
+        "title": "Toggle Line Cancelled",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.toggleStart",
+        "title": "Toggle Line Start",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.toggleDue",
+        "title": "Toggle Line Due",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.toggleQueue",
+        "title": "Toggle Line Queue",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.toggleQueueUnshift",
+        "title": "Toggle Line Queue Unshift",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.toggleWaiting",
+        "title": "Toggle Line Waiting",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.togglePending",
+        "title": "Toggle Line Pending",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.toggleHide",
+        "title": "Toggle Line Hide",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.toggleRepeat",
+        "title": "Toggle Line Repeat",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.indent",
+        "title": "Indent Lines",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.dedent",
+        "title": "Dedent Lines",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.repeatTasks",
+        "title": "Repeat Tasks",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.archive",
+        "title": "Archive Task Blocks",
+        "category": "Todo"
+      },
+      {
+        "command": "todo-language.unarchive",
+        "title": "Unarchive Task Blocks",
+        "category": "Todo"
+      }
+    ],
+    "keybindings": [
+      {
+        "key": "alt+d",
+        "command": "todo-language.toggleDone",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+c",
+        "command": "todo-language.toggleCancelled",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+s",
+        "command": "todo-language.toggleStart",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+shift+d",
+        "command": "todo-language.toggleDue",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+q",
+        "command": "todo-language.toggleQueue",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+shift+q",
+        "command": "todo-language.toggleQueueUnshift",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+w",
+        "command": "todo-language.toggleWaiting",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+p",
+        "command": "todo-language.togglePending",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+h",
+        "command": "todo-language.toggleHide",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+r",
+        "command": "todo-language.toggleRepeat",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "tab",
+        "command": "todo-language.indent",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "shift+tab",
+        "command": "todo-language.dedent",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+a",
+        "command": "todo-language.archive",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+shift+a",
+        "command": "todo-language.unarchive",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      }
+    ],
+    "semanticTokenTypes": [
+      { "id": "todo-line", "description": "Grayed-out todo line (done/cancelled/hide/archive)" },
+      { "id": "todo-heading-content", "description": "Heading text before the colon" },
+      { "id": "todo-heading-symbol", "description": "Heading colon" },
+      { "id": "todo-tag", "description": "Generic @tag" },
+      { "id": "start-tag", "description": "@start(date) tag" },
+      { "id": "due-tag", "description": "@due(date) tag" },
+      { "id": "repeat-tag", "description": "@repeat(cron) tag" },
+      { "id": "todo-bold", "description": "**bold** span" },
+      { "id": "todo-italic", "description": "*italic* span" },
+      { "id": "todo-code", "description": "`code` span" },
+      { "id": "todo-url", "description": "<url> span" }
+    ],
+    "semanticTokenModifiers": [
+      { "id": "italic", "description": "Italic font style" },
+      { "id": "queue1", "description": "@queue(1) tier" },
+      { "id": "past", "description": "Date is in the past" },
+      { "id": "future", "description": "Date is in the future" },
+      { "id": "invalid", "description": "Unparseable date or invalid cron" },
+      { "id": "valid", "description": "Valid cron expression" }
+    ],
+    "configuration": {
+      "title": "Todo",
+      "properties": {
+        "todo-language.repeatTask.autoRepeat": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run Repeat Tasks automatically at startup, on editor switch, and every minute."
         }
       }
-    ]
+    },
+    "configurationDefaults": {
+      "[todo]": {
+        "editor.semanticHighlighting.enabled": true,
+        "editor.tabSize": 4,
+        "editor.bracketPairColorization.enabled": false,
+        "editor.matchBrackets": "never",
+        "editor.occurrencesHighlight": "off",
+        "editor.selectionHighlight": false,
+        "editor.stickyScroll.enabled": false,
+        "editor.foldingHighlight": false
+      },
+      "editor.semanticTokenColorCustomizations": {
+        "rules": {
+          "todo-line": "#666666",
+          "todo-line.italic": { "foreground": "#666666", "italic": true },
+          "todo-heading-content": { "foreground": "#66d9ef", "bold": true },
+          "todo-heading-symbol": { "bold": true },
+          "todo-tag": "#ACA7CB",
+          "todo-tag.queue1": "#F9F871",
+          "todo-bold": { "foreground": "#D57F6D", "bold": true },
+          "todo-italic": { "italic": true },
+          "todo-code": "#FAB565",
+          "start-tag.future": "#ACA7CB",
+          "start-tag.past": "#F9F871",
+          "start-tag.invalid": { "foreground": "#FF0000", "underline": true },
+          "due-tag.future": "#ACA7CB",
+          "due-tag.past": "#FF0000",
+          "due-tag.invalid": { "foreground": "#FF0000", "underline": true },
+          "repeat-tag.valid": "#FAB565",
+          "repeat-tag.invalid": { "foreground": "#FF0000", "underline": true }
+        }
+      }
+    }
   },
   "scripts": {
     "build": "node esbuild.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
     "package": "vsce package",
     "vscode:prepublish": "node esbuild.js --production"
   },
@@ -56,9 +256,9 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.24.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "@types/vscode": "^1.85.0"
   }
 }

@@ -79,7 +79,7 @@ mod tests {
         // `#` is not a comment in this language: the external scanner that
         // produces `text` consumes the whole line, including any leading `#`.
         // So a `#`-prefixed line parses as a `task_line` whose text starts
-        // with `#`. See GRAMMAR.md and the comment on `extras` in grammar.js.
+        // with `#`. See the root SPEC.md and grammar.js.
         let input = "# just a note\n";
         assert!(!has_error(input));
         assert_eq!(named_child_count(input), 1);
@@ -104,9 +104,8 @@ mod tests {
 
     #[test]
     fn broken_input_sets_has_error() {
-        // `@done(` with no preceding text: the grammar's `repeat1(tag)` path
-        // forces a tag, then `(` (with no closing `)`) is unexpected at EOF, so
-        // tree-sitter yields an ERROR node.
+        // `@done(` with no preceding text: `text` is required, so the line
+        // cannot be a `task_line`; tree-sitter yields an ERROR node.
         assert!(has_error("@done("));
     }
 
@@ -130,3 +129,4 @@ mod tests {
         assert_eq!(first, second);
     }
 }
+

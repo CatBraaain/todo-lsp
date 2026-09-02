@@ -1,10 +1,13 @@
-use std::sync::OnceLock;
+use std::str::FromStr;
 
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use croner::Cron;
 use tower_lsp_server::ls_types::{
-    Diagnostic, DiagnosticSeverity, DocumentSymbol, FoldingRange, FoldingRangeKind, Position,
-    Range, SemanticToken, SemanticTokensLegend, SemanticTokenType, SymbolKind,
+    Diagnostic, DiagnosticSeverity, DocumentLink, DocumentSymbol, FoldingRange, FoldingRangeKind,
+    Position, Range, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
+    SymbolKind,
 };
-use tree_sitter::{Language, Node, Query, QueryCursor, StreamingIterator};
+use tree_sitter::Node;
 
 /// Build the outline: walk `source_file`'s named children, skipping zero-width
 /// `indent`/`dedent` tokens, mapping `heading_block` -> `MODULE` and
@@ -49,11 +52,10 @@ fn symbol_from_heading_block(node: &Node, source: &[u8]) -> DocumentSymbol {
                 .child_by_field_name("text")
                 .and_then(|t| t.utf8_text(source).ok())
                 .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "(untitled)".to_string());
+                .unwrap_or_default();
             (text, range_from_node(&hl))
         }
-        None => ("(untitled)".to_string(), range_from_node(node)),
+        None => (String::new(), range_from_node(node)),
     };
 
     let children = task_block
@@ -79,16 +81,7 @@ fn symbol_from_task_line(node: &Node, source: &[u8]) -> DocumentSymbol {
         .child_by_field_name("text")
         .and_then(|t| t.utf8_text(source).ok())
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            named_children_of(node)
-                .into_iter()
-                .find(|c| c.kind() == "tag")
-                .and_then(|tag| tag.child_by_field_name("name"))
-                .and_then(|n| n.utf8_text(source).ok())
-                .map(|s| format!("@{}", s.trim()))
-        })
-        .unwrap_or_else(|| "(task)".to_string());
+        .unwrap_or_default();
 
     let range = range_from_node(node);
     make_symbol(name, SymbolKind::STRING, range, range, None)
@@ -212,7 +205,10 @@ pub fn diagnostics(root: Node) -> Vec<Diagnostic> {
             }
         }
         if !descended {
-            out.push(make_diagnostic(range_from_node(&node), "missing syntax element"));
+            out.push(make_diagnostic(
+                range_from_node(&node),
+                "missing syntax element",
+            ));
         }
     }
     out
@@ -252,98 +248,475 @@ fn range_from_node(node: &Node) -> Range {
     }
 }
 
-// Tree-sitter highlight query (consumed by `semantic_tokens`). Cross-crate
-// path: todo-lsp/src/ -> ../../ -> workspace root -> tree-sitter-todo/queries.
-const HIGHLIGHTS_QUERY_SRC: &str =
-    include_str!("../../tree-sitter-todo/queries/highlights.scm");
-
-/// Compile the highlight query once and reuse it across requests. The query
-/// depends only on the (immutable) language, not on parser state, so caching
-/// is safe — unlike `parse`, which rebuilds a fresh parser every call to
-/// reset the external scanner's indentation stack.
-fn highlights_query() -> &'static Query {
-    static Q: OnceLock<Query> = OnceLock::new();
-    Q.get_or_init(|| {
-        let language: Language = tree_sitter_todo::LANGUAGE.into();
-        Query::new(&language, HIGHLIGHTS_QUERY_SRC).expect("failed to compile highlights.scm")
-    })
-}
-
-/// The semantic-token legend advertised to clients. The index of each token
-/// type here MUST stay in sync with the capture -> type-index mapping in
-/// `semantic_tokens` (heading = 0, tag = 1).
-pub fn semantic_tokens_legend() -> SemanticTokensLegend {
-    SemanticTokensLegend {
-        token_types: vec![SemanticTokenType::TYPE, SemanticTokenType::DECORATOR],
-        token_modifiers: vec![],
-    }
-}
-
-/// Build semantic tokens by running the highlight query and delta-encoding
-/// the captures. The legend carries only `heading` and `tag` (the two
-/// captures highlights.scm emits); the catch-all arm skips any other
-/// capture.
-pub fn semantic_tokens(root: Node, source: &[u8]) -> Vec<SemanticToken> {
-    let query = highlights_query();
-    let heading_cap = query
-        .capture_index_for_name("heading")
-        .expect("highlights.scm must define @heading");
-    let tag_cap = query
-        .capture_index_for_name("tag")
-        .expect("highlights.scm must define @tag");
-
-    let mut cursor = QueryCursor::new();
-    let mut captures = cursor.captures(query, root, source);
-
-    // (row, col, length, type_idx) — unsorted, a row may carry several.
-    let mut raw: Vec<(u32, u32, u32, u32)> = Vec::new();
-    while let Some((m, idx)) = captures.next() {
-        let cap = m.captures[*idx];
-        let type_idx = match cap.index {
-            i if i == heading_cap => 0,
-            i if i == tag_cap => 1,
-            _ => continue, // any capture not in the legend
+/// Build document links for closed `<https://…>`, `<http://…>` and
+/// `<ftp://…>` spans. Link ranges obey the same display precedence as inline
+/// styling: gray / Archive / heading lines do not expose individual links.
+pub fn document_links(source: &[u8]) -> Vec<DocumentLink> {
+    let mut out = Vec::new();
+    let mut line_idx = 0u32;
+    let mut pos = 0usize;
+    while pos < source.len() {
+        let line_start = pos;
+        let line_end = source[line_start..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|offset| line_start + offset)
+            .unwrap_or(source.len());
+        let content_end = if line_end > line_start && source[line_end - 1] == b'\r' {
+            line_end - 1
+        } else {
+            line_end
         };
-        let start = cap.node.start_position();
-        let start_byte = cap.node.start_byte();
-        let mut end_byte = cap.node.end_byte();
-        // heading_line ends with $._newline, so the node spans into the next
-        // row (see the comment in `folding_range_for_heading`). LSP semantic
-        // tokens cannot span rows, so strip the trailing newline/CR bytes.
-        while end_byte > start_byte
-            && matches!(source.get(end_byte - 1), Some(b'\n') | Some(b'\r'))
-        {
-            end_byte -= 1;
+        let line = &source[line_start..content_end];
+        if let Ok(text) = std::str::from_utf8(line) {
+            let parts = crate::line::parse_line(text);
+            if !parts.is_blank()
+                && !parts.is_archive_heading(text)
+                && parts.gray().is_none()
+                && !parts.is_heading()
+            {
+                let (start, end) = parts.text_range;
+                collect_document_links(&line[start..end], start, line_idx, &mut out);
+            }
         }
-        let length = (end_byte - start_byte) as u32;
-        if length == 0 {
+        pos = if line_end < source.len() {
+            line_end + 1
+        } else {
+            source.len()
+        };
+        line_idx += 1;
+    }
+    out
+}
+
+fn collect_document_links(line: &[u8], offset: usize, line_idx: u32, out: &mut Vec<DocumentLink>) {
+    let mut i = 0;
+    while i < line.len() {
+        if line[i] != b'<' {
+            i += 1;
             continue;
         }
-        raw.push((start.row as u32, start.column as u32, length, type_idx));
+        let rest = &line[i + 1..];
+        let has_scheme = rest.starts_with(b"https://")
+            || rest.starts_with(b"http://")
+            || rest.starts_with(b"ftp://");
+        if !has_scheme {
+            i += 1;
+            continue;
+        }
+        let Some(gt) = rest.iter().position(|&b| b == b'>') else {
+            i += 1; // unclosed URL: no link
+            continue;
+        };
+        let end = i + gt + 2;
+        if let Ok(url) = std::str::from_utf8(&line[i + 1..end - 1]) {
+            if let Ok(target) = url.parse::<tower_lsp_server::ls_types::Uri>() {
+                out.push(DocumentLink {
+                    range: Range {
+                        start: Position {
+                            line: line_idx,
+                            character: (offset + i) as u32,
+                        },
+                        end: Position {
+                            line: line_idx,
+                            character: (offset + end) as u32,
+                        },
+                    },
+                    target: Some(target),
+                    tooltip: None,
+                    data: None,
+                });
+            }
+        }
+        i = end;
+    }
+}
+
+// === Semantic tokens ===
+//
+// Highlighting is a line-based scanner over the raw document bytes. Each
+// line is classified via `crate::line` (SPEC.md's 用語 model) by the 適用規則
+// precedence (archive -> done -> cancelled -> hide -> heading -> plain) and
+// emits the corresponding token types. `@start`/`@due`/`@repeat` tags
+// additionally carry past/future/valid/invalid modifiers computed from the
+// argument (date parse / cron validation vs `now`). Columns are UTF-8 byte
+// offsets — the server advertises `offsetEncoding: utf-8`.
+
+/// Token type indices. MUST stay in sync with `semantic_tokens_legend`.
+mod tt {
+    pub const TODO_LINE: u32 = 0;
+    pub const TODO_HEADING_CONTENT: u32 = 1;
+    pub const TODO_HEADING_SYMBOL: u32 = 2;
+    pub const TODO_TAG: u32 = 3;
+    pub const START_TAG: u32 = 4;
+    pub const DUE_TAG: u32 = 5;
+    pub const REPEAT_TAG: u32 = 6;
+    pub const TODO_BOLD: u32 = 7;
+    pub const TODO_ITALIC: u32 = 8;
+    pub const TODO_CODE: u32 = 9;
+    pub const TODO_URL: u32 = 10;
+}
+
+/// Token modifier bits. MUST stay in sync with `semantic_tokens_legend`.
+mod tm {
+    pub const ITALIC: u32 = 1 << 0;
+    pub const QUEUE1: u32 = 1 << 1;
+    pub const PAST: u32 = 1 << 2;
+    pub const FUTURE: u32 = 1 << 3;
+    pub const INVALID: u32 = 1 << 4;
+    pub const VALID: u32 = 1 << 5;
+}
+
+/// The semantic-token legend advertised to clients. The index of each type /
+/// modifier MUST stay in sync with the `tt::*` / `tm::*` constants.
+pub fn semantic_tokens_legend() -> SemanticTokensLegend {
+    SemanticTokensLegend {
+        token_types: vec![
+            SemanticTokenType::new("todo-line"),
+            SemanticTokenType::new("todo-heading-content"),
+            SemanticTokenType::new("todo-heading-symbol"),
+            SemanticTokenType::new("todo-tag"),
+            SemanticTokenType::new("start-tag"),
+            SemanticTokenType::new("due-tag"),
+            SemanticTokenType::new("repeat-tag"),
+            SemanticTokenType::new("todo-bold"),
+            SemanticTokenType::new("todo-italic"),
+            SemanticTokenType::new("todo-code"),
+            SemanticTokenType::new("todo-url"),
+        ],
+        token_modifiers: vec![
+            SemanticTokenModifier::new("italic"),
+            SemanticTokenModifier::new("queue1"),
+            SemanticTokenModifier::new("past"),
+            SemanticTokenModifier::new("future"),
+            SemanticTokenModifier::new("invalid"),
+            SemanticTokenModifier::new("valid"),
+        ],
+    }
+}
+
+// Line classification is delegated to `crate::line::parse_line` (SPEC.md's
+// 用語 definitions: 見出し行 / タスク行 / タグ列 / 灰色行).
+
+/// Result of interpreting a `@start`/`@due` argument as a date against `now`.
+enum DateMod {
+    Past,
+    Future,
+    Invalid,
+}
+
+/// Parse a `@start`/`@due` argument and classify it relative to `now`.
+///
+/// Accepted formats (first match wins, all parsed as UTC): `%Y-%m-%d`,
+/// `%Y-%m-%d %H:%M`. `<= now` is `Past`, `> now` is `Future`, and anything
+/// that fails to parse is `Invalid`. `now` is a parameter so tests can inject
+/// a fixed instant.
+fn classify_date(arg: &str, now: DateTime<Utc>) -> DateMod {
+    let arg = arg.trim();
+    let parsed: Result<chrono::DateTime<chrono::Utc>, _> =
+        NaiveDateTime::parse_from_str(arg, "%Y-%m-%d %H:%M")
+            .map(|dt| dt.and_utc())
+            .or_else(|_| {
+                NaiveDate::parse_from_str(arg, "%Y-%m-%d")
+                    .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc())
+            });
+    match parsed {
+        Ok(dt) if dt <= now => DateMod::Past,
+        Ok(_) => DateMod::Future,
+        Err(_) => DateMod::Invalid,
+    }
+}
+
+/// Whether `arg` is a valid cron expression. Uses `croner` (POSIX/Vixie 5-field
+/// + `L`/`#`/`W` extensions) to match SPEC.md's `@repeat` grammar.
+fn is_valid_cron(arg: &str) -> bool {
+    Cron::from_str(arg.trim()).is_ok()
+}
+
+/// Build the document's semantic tokens by scanning `source` line by line
+/// and delta-encoding the result per the LSP spec.
+pub fn semantic_tokens(source: &[u8]) -> Vec<SemanticToken> {
+    semantic_tokens_at(source, Utc::now())
+}
+
+/// Same as [`semantic_tokens`] but with an injectable `now`, so the
+/// past/future boundary for `@start`/`@due` is deterministic in tests.
+fn semantic_tokens_at(source: &[u8], now: DateTime<Utc>) -> Vec<SemanticToken> {
+    // (line, byte_col, byte_len, type_idx, modifier_bitset) — a row may carry
+    // several; sorted and delta-encoded below.
+    let mut raw: Vec<(u32, u32, u32, u32, u32)> = Vec::new();
+
+    let mut line_idx: u32 = 0;
+    let mut pos = 0;
+    while pos < source.len() {
+        let line_start = pos;
+        let line_end = source[line_start..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|offset| line_start + offset)
+            .unwrap_or(source.len());
+        // Exclude a trailing CR so token spans stay within the line content.
+        let content_end = if line_end > line_start && source[line_end - 1] == b'\r' {
+            line_end - 1
+        } else {
+            line_end
+        };
+        classify_line(&source[line_start..content_end], line_idx, now, &mut raw);
+
+        pos = if line_end < source.len() {
+            line_end + 1
+        } else {
+            source.len()
+        };
+        line_idx += 1;
     }
 
-    // Stable sort by (row, col): ties keep insertion order.
-    raw.sort_by_key(|&(r, c, _, _)| (r, c));
+    // Stable sort by (line, col): ties keep insertion order.
+    raw.sort_by_key(|&(l, c, _, _, _)| (l, c));
 
     // Delta-encode per LSP spec: delta_start is relative to the previous
     // token's start on the same row, absolute on a new row.
     let mut tokens = Vec::with_capacity(raw.len());
     let mut prev_line = 0u32;
     let mut prev_start = 0u32;
-    for (line, start, length, type_idx) in raw {
+    for (line, start, length, type_idx, mods) in raw {
         let delta_line = line - prev_line;
-        let delta_start = if delta_line == 0 { start - prev_start } else { start };
+        let delta_start = if delta_line == 0 {
+            start - prev_start
+        } else {
+            start
+        };
         tokens.push(SemanticToken {
             delta_line,
             delta_start,
             length,
             token_type: type_idx,
-            token_modifiers_bitset: 0,
+            token_modifiers_bitset: mods,
         });
         prev_line = line;
         prev_start = start;
     }
     tokens
+}
+
+/// Classify a single line (no trailing newline) and push its tokens. Columns
+/// are byte offsets from the line start.
+fn classify_line(
+    line: &[u8],
+    line_idx: u32,
+    now: DateTime<Utc>,
+    raw: &mut Vec<(u32, u32, u32, u32, u32)>,
+) {
+    let Ok(text) = std::str::from_utf8(line) else {
+        return;
+    };
+    let parts = crate::line::parse_line(text);
+    if parts.is_blank() {
+        return;
+    }
+    // 適用規則 1: `Archive:` 見出し行 — whole line gray.
+    if parts.is_archive_heading(text) {
+        raw.push((line_idx, 0, line.len() as u32, tt::TODO_LINE, 0));
+        return;
+    }
+    // 適用規則 2-4: done / cancelled / hide — the whole line is one grayed
+    // token; inner tags and stylings are suppressed. cancelled is italic.
+    match parts.gray() {
+        Some(crate::line::Gray::Done) | Some(crate::line::Gray::Hide) => {
+            raw.push((line_idx, 0, line.len() as u32, tt::TODO_LINE, 0));
+            return;
+        }
+        Some(crate::line::Gray::Cancelled) => {
+            raw.push((line_idx, 0, line.len() as u32, tt::TODO_LINE, tm::ITALIC));
+            return;
+        }
+        None => {}
+    }
+    // 適用規則 5: 見出し行 — content + symbol + the tag column; no stylings.
+    if let Some(colon) = parts.colon() {
+        let (text_start, text_end) = parts.text_range;
+        if text_end > text_start {
+            raw.push((
+                line_idx,
+                text_start as u32,
+                (text_end - text_start) as u32,
+                tt::TODO_HEADING_CONTENT,
+                0,
+            ));
+            raw.push((line_idx, colon as u32, 1, tt::TODO_HEADING_SYMBOL, 0));
+            for tag in &parts.tags {
+                push_tag_token(tag, line_idx, now, raw);
+            }
+        }
+        return;
+    }
+    // 適用規則 6: 通常行 — the tag column, plus stylings over the body text.
+    for tag in &parts.tags {
+        push_tag_token(tag, line_idx, now, raw);
+    }
+    let (text_start, text_end) = parts.text_range;
+    scan_styles(&line[text_start..text_end], text_start, line_idx, raw);
+}
+
+/// Push one token for a tag-column [`Tag`], with the date/cron modifiers for
+/// `@start` / `@due` / `@repeat` and the yellow tier for `@queue(1)`.
+fn push_tag_token(
+    tag: &crate::line::Tag,
+    line_idx: u32,
+    now: DateTime<Utc>,
+    raw: &mut Vec<(u32, u32, u32, u32, u32)>,
+) {
+    let arg = tag.arg.as_deref().unwrap_or("");
+    let (type_idx, mods) = match tag.name.as_str() {
+        "start" => {
+            let m = match classify_date(arg, now) {
+                DateMod::Past => tm::PAST,
+                DateMod::Future => tm::FUTURE,
+                DateMod::Invalid => tm::INVALID,
+            };
+            (tt::START_TAG, m)
+        }
+        "due" => {
+            let m = match classify_date(arg, now) {
+                DateMod::Past => tm::PAST,
+                DateMod::Future => tm::FUTURE,
+                DateMod::Invalid => tm::INVALID,
+            };
+            (tt::DUE_TAG, m)
+        }
+        "repeat" => {
+            let m = if is_valid_cron(arg) {
+                tm::VALID
+            } else {
+                tm::INVALID
+            };
+            (tt::REPEAT_TAG, m)
+        }
+        "queue" => {
+            let m = if arg == "1" { tm::QUEUE1 } else { 0 };
+            (tt::TODO_TAG, m)
+        }
+        _ => (tt::TODO_TAG, 0),
+    };
+    raw.push((
+        line_idx,
+        tag.start as u32,
+        (tag.end - tag.start) as u32,
+        type_idx,
+        mods,
+    ));
+}
+
+/// Scan `line` for inline stylings (`**bold**`, `*italic*`, `` `code` ``,
+/// `<url>`) and push one token per span. Bold is tried before italic at each
+/// position to mirror the grammar's `#stylings` include order.
+fn scan_styles(
+    line: &[u8],
+    offset: usize,
+    line_idx: u32,
+    raw: &mut Vec<(u32, u32, u32, u32, u32)>,
+) {
+    let mut i = 0;
+    while i < line.len() {
+        match line[i] {
+            b'*' if i + 1 < line.len() && line[i + 1] == b'*' => {
+                // bold: content is [^*]* then a closing `**`.
+                let mut j = i + 2;
+                while j < line.len() && line[j] != b'*' {
+                    j += 1;
+                }
+                if j + 1 < line.len() && line[j + 1] == b'*' {
+                    let end = j + 2;
+                    raw.push((
+                        line_idx,
+                        (offset + i) as u32,
+                        (end - i) as u32,
+                        tt::TODO_BOLD,
+                        0,
+                    ));
+                    i = end;
+                } else {
+                    i += 2;
+                }
+            }
+            b'*' => {
+                // italic: content is [^*]* then a closing `*`.
+                let mut j = i + 1;
+                while j < line.len() && line[j] != b'*' {
+                    j += 1;
+                }
+                if j < line.len() {
+                    let end = j + 1;
+                    raw.push((
+                        line_idx,
+                        (offset + i) as u32,
+                        (end - i) as u32,
+                        tt::TODO_ITALIC,
+                        0,
+                    ));
+                    i = end;
+                } else {
+                    i += 1;
+                }
+            }
+            b'`' => {
+                // code: a run of n backticks, content, then a run of exactly n.
+                let mut n = 0;
+                while i + n < line.len() && line[i + n] == b'`' {
+                    n += 1;
+                }
+                let mut k = i + n;
+                let mut close: Option<usize> = None;
+                while k + n <= line.len() {
+                    if (k..k + n).all(|p| line[p] == b'`')
+                        && (k == 0 || line[k - 1] != b'`')
+                        && (k + n >= line.len() || line[k + n] != b'`')
+                    {
+                        close = Some(k);
+                        break;
+                    }
+                    k += 1;
+                }
+                match close {
+                    Some(c) => {
+                        let end = c + n;
+                        raw.push((
+                            line_idx,
+                            (offset + i) as u32,
+                            (end - i) as u32,
+                            tt::TODO_CODE,
+                            0,
+                        ));
+                        i = end;
+                    }
+                    None => i += n,
+                }
+            }
+            b'<' => {
+                // url: <scheme://...> up to the next `>`.
+                let rest = &line[i + 1..];
+                let has_scheme = rest.starts_with(b"https://")
+                    || rest.starts_with(b"http://")
+                    || rest.starts_with(b"ftp://");
+                if has_scheme {
+                    if let Some(gt) = rest.iter().position(|&b| b == b'>') {
+                        let end = i + 1 + gt + 1;
+                        raw.push((
+                            line_idx,
+                            (offset + i) as u32,
+                            (end - i) as u32,
+                            tt::TODO_URL,
+                            0,
+                        ));
+                        i = end;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -410,8 +783,13 @@ Archive:
     }
 
     fn semantic_tokens_of(text: &str) -> Vec<SemanticToken> {
-        let tree = parse(text);
-        semantic_tokens(tree.root_node(), text.as_bytes())
+        semantic_tokens(text.as_bytes())
+    }
+
+    /// Like `semantic_tokens_of` but with a fixed `now` (UTC), so date-tag
+    /// past/future boundary tests are deterministic.
+    fn tokens_at(text: &str, now: DateTime<Utc>) -> Vec<SemanticToken> {
+        semantic_tokens_at(text.as_bytes(), now)
     }
 
     /// Assert that a (valid) input produces no diagnostics.
@@ -516,20 +894,16 @@ Archive:
     }
 
     #[test]
-    fn symbols_empty_text_task_falls_back_to_tag() {
-        // No `text` field: the first tag's name becomes the label.
-        let s = symbols_of("@done\n");
-        assert_eq!(top_names(&s), ["@done"]);
-        assert_eq!(s[0].kind, SymbolKind::STRING);
+    fn symbols_tag_only_line_yields_no_symbol() {
+        // `text` is required: a tag-only line is an ERROR node, not a task.
+        assert!(symbols_of("@done\n").is_empty());
     }
 
     #[test]
-    fn symbols_heading_empty_text_with_tag_is_untitled() {
-        // Heading with empty text and a tag falls back to "(untitled)".
-        let s = symbols_of(": @done\n");
-        assert_eq!(top_names(&s), ["(untitled)"]);
-        assert_eq!(s[0].kind, SymbolKind::MODULE);
-        assert!(s[0].children.is_none());
+    fn symbols_heading_without_text_yields_no_symbol() {
+        // `text` is required: a heading with no body is an ERROR node.
+        assert!(symbols_of(": @done\n").is_empty());
+        assert!(symbols_of(":\n").is_empty());
     }
 
     #[test]
@@ -558,14 +932,12 @@ Archive:
 
     #[test]
     fn symbols_nested_headings() {
-        let s = symbols_of("Project:\n  Phase 1:\n    design spec\n    prototype\n  kickoff meeting\n");
+        let s =
+            symbols_of("Project:\n  Phase 1:\n    design spec\n    prototype\n  kickoff meeting\n");
         assert_eq!(top_names(&s), ["Project"]);
         assert_eq!(s[0].kind, SymbolKind::MODULE);
         assert_eq!(child_names(&s[0]), ["Phase 1", "kickoff meeting"]);
-        assert_eq!(
-            child_kinds(&s[0]),
-            [SymbolKind::MODULE, SymbolKind::STRING]
-        );
+        assert_eq!(child_kinds(&s[0]), [SymbolKind::MODULE, SymbolKind::STRING]);
         let phase1 = &s[0].children.as_ref().unwrap()[0];
         assert_eq!(child_names(phase1), ["design spec", "prototype"]);
     }
@@ -653,7 +1025,8 @@ Archive:
     fn fold_nested_boundaries() {
         // Project's task_block ends after `kickoff meeting\n` (row 5 -> end 4);
         // Phase 1's ends after `prototype\n` (row 4 -> end 3).
-        let r = folds_of("Project:\n  Phase 1:\n    design spec\n    prototype\n  kickoff meeting\n");
+        let r =
+            folds_of("Project:\n  Phase 1:\n    design spec\n    prototype\n  kickoff meeting\n");
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].start_line, 0);
         assert_eq!(r[0].end_line, 4);
@@ -722,8 +1095,6 @@ Archive:
         let valid = [
             "buy milk\n",
             "task a\n\ntask b\n",
-            "@done\n",
-            ": @done\n",
             "time is 12:30\n",
             "see http://example.com for details\n",
             "email me at user@example.com @done\n",
@@ -774,8 +1145,15 @@ Archive:
         // The walk surfaces both ERROR nodes ("syntax error") and
         // non-traversable MISSING descendants ("missing syntax element").
         // `@done(` and the indented variant yield ERROR nodes; the
-        // heading-indented form yields a MISSING _newline.
-        for input in ["@done(", "task\n  @done(", "Project:\n  @done("] {
+        // heading-indented form yields a MISSING _newline. A tag-only line
+        // and a textless heading are plain ERROR nodes.
+        for input in [
+            "@done(",
+            "task\n  @done(",
+            "Project:\n  @done(",
+            "@done",
+            ":",
+        ] {
             let diags = diags_of(input);
             assert!(!diags.is_empty(), "expected diagnostics for {input:?}");
             for d in &diags {
@@ -789,34 +1167,88 @@ Archive:
     }
 
     #[test]
-    fn diagnostics_missing_newline_after_tag_is_detected() {
-        // `@done(` indented under a heading: tree-sitter inserts a
-        // non-traversable MISSING _newline (the required newline after the
-        // tag is absent at EOF). The has_error()-based walk surfaces it as
-        // "missing syntax element" at the enclosing task_line's range (row 1).
+    fn diagnostics_indented_tag_only_line_is_error_on_its_row() {
+        // `@done(` indented under a heading: with `text` required, the
+        // tag-only line is a plain ERROR node ("syntax error") sitting on
+        // the indented row (row 1), not on the heading.
         let diags = diags_of("Project:\n  @done(");
-        assert!(!diags.is_empty(), "MISSING _newline must produce a diagnostic");
-        assert!(
-            diags.iter().any(|d| d.message == "missing syntax element"),
-            "expected a missing-element diagnostic, got {diags:?}"
-        );
-        assert!(diags.iter().all(|d| d.severity == Some(DiagnosticSeverity::ERROR)));
-        assert!(diags.iter().all(|d| d.source.as_deref() == Some("todo")));
-        assert!(
-            diags.iter().all(|d| d.range.start.line == 1),
-            "diagnostic must sit on the indented line, got {diags:?}"
-        );
+        assert!(!diags.is_empty());
+        for d in &diags {
+            assert_eq!(d.message, "syntax error", "got {diags:?}");
+            assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+            assert_eq!(d.source.as_deref(), Some("todo"));
+            assert_eq!(
+                d.range.start.line, 1,
+                "diagnostic must sit on the indented line, got {diags:?}"
+            );
+        }
+    }
+
+    /// Decode delta-encoded tokens back to absolute (line, col, len, type,
+    /// mods) positions — easier to reason about than raw deltas.
+    fn abs_positions(tokens: &[SemanticToken]) -> Vec<(u32, u32, u32, u32, u32)> {
+        let mut out = Vec::with_capacity(tokens.len());
+        let mut line = 0u32;
+        let mut col = 0u32;
+        for t in tokens {
+            line += t.delta_line;
+            col = if t.delta_line == 0 {
+                col + t.delta_start
+            } else {
+                t.delta_start
+            };
+            out.push((line, col, t.length, t.token_type, t.token_modifiers_bitset));
+        }
+        out
+    }
+
+    fn token_tuple(t: &SemanticToken) -> (u32, u32, u32, u32, u32) {
+        (
+            t.delta_line,
+            t.delta_start,
+            t.length,
+            t.token_type,
+            t.token_modifiers_bitset,
+        )
+    }
+
+    /// A fixed "now" (UTC) for deterministic @start/@due classification.
+    fn fixed_now() -> DateTime<Utc> {
+        NaiveDate::from_ymd_opt(2024, 6, 15)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+            .and_utc()
     }
 
     #[test]
     fn semantic_tokens_legend_matches_token_indices() {
-        // The legend is the contract clients use to decode token_type. Pin the
-        // order: index 0 = "type" (heading), index 1 = "decorator" (tag).
+        // The legend is the contract clients use to decode token_type and
+        // token_modifiers_bitset. Pin the order so indices match `tt::*` /
+        // `tm::*`.
         let legend = semantic_tokens_legend();
-        assert_eq!(legend.token_types.len(), 2);
-        assert_eq!(legend.token_types[0].as_str(), "type");
-        assert_eq!(legend.token_types[1].as_str(), "decorator");
-        assert!(legend.token_modifiers.is_empty());
+        let type_names: Vec<&str> = legend.token_types.iter().map(|t| t.as_str()).collect();
+        assert_eq!(
+            type_names,
+            [
+                "todo-line",
+                "todo-heading-content",
+                "todo-heading-symbol",
+                "todo-tag",
+                "start-tag",
+                "due-tag",
+                "repeat-tag",
+                "todo-bold",
+                "todo-italic",
+                "todo-code",
+                "todo-url",
+            ]
+        );
+        let mod_names: Vec<&str> = legend.token_modifiers.iter().map(|m| m.as_str()).collect();
+        assert_eq!(
+            mod_names,
+            ["italic", "queue1", "past", "future", "invalid", "valid"]
+        );
     }
 
     #[test]
@@ -826,100 +1258,292 @@ Archive:
 
     #[test]
     fn sample_semantic_tokens() {
-        let tokens = semantic_tokens_of(SAMPLE);
-        assert_eq!(tokens.len(), 6, "3 headings + 3 tags");
+        let abs = abs_positions(&semantic_tokens_of(SAMPLE));
+        assert_eq!(
+            abs.len(),
+            8,
+            "2 headings x2 tokens + 1 tag + 2 gray lines + archive"
+        );
+        assert_eq!(abs[0], (0, 0, 5, tt::TODO_HEADING_CONTENT, 0)); // L0 "Inbox"
+        assert_eq!(abs[1], (0, 5, 1, tt::TODO_HEADING_SYMBOL, 0)); // L0 ":"
+                                                                   // L2 has @done in its tag column -> whole line gray.
+        assert_eq!(abs[2], (2, 0, 28, tt::TODO_LINE, 0));
+        assert_eq!(abs[3], (3, 2, 7, tt::TODO_HEADING_CONTENT, 0)); // L3 "Project"
+        assert_eq!(abs[4], (3, 9, 1, tt::TODO_HEADING_SYMBOL, 0)); // L3 ":"
+        assert_eq!(abs[5], (4, 15, 15, tt::TODO_TAG, 0)); // L4 "@priority(high)"
+        assert_eq!(abs[6], (5, 0, 16, tt::TODO_LINE, 0)); // L5 gray (@done)
+        assert_eq!(abs[7], (7, 0, 8, tt::TODO_LINE, 0)); // L7 "Archive:"
+    }
 
-        // (delta_line, delta_start, length, token_type, modifier_bitset)
-        let expected: [(u32, u32, u32, u32, u32); 6] = [
-            (0, 0, 6, 0, 0),   // L0 `Inbox:`
-            (2, 11, 17, 1, 0), // L2 `@done(2024-01-01)`
-            (1, 2, 8, 0, 0),   // L3 `Project:`
-            (1, 15, 15, 1, 0), // L4 `@priority(high)`
-            (1, 11, 5, 1, 0),  // L5 `@done`
-            (2, 0, 8, 0, 0),   // L7 `Archive:`
-        ];
-        for (i, want) in expected.iter().enumerate() {
-            let got = &tokens[i];
-            assert_eq!(
-                (
-                    got.delta_line,
-                    got.delta_start,
-                    got.length,
-                    got.token_type,
-                    got.token_modifiers_bitset
-                ),
-                *want,
-                "mismatch at token {i}",
-            );
+    #[test]
+    fn semantic_tokens_heading_content_and_symbol() {
+        let abs = abs_positions(&semantic_tokens_of("Inbox:\n"));
+        assert_eq!(abs.len(), 2);
+        assert_eq!(abs[0], (0, 0, 5, tt::TODO_HEADING_CONTENT, 0));
+        assert_eq!(abs[1], (0, 5, 1, tt::TODO_HEADING_SYMBOL, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_heading_without_text_is_empty() {
+        // ":\n" is a syntax error (text is required), so no tokens are emitted.
+        assert!(semantic_tokens_of(":\n").is_empty());
+    }
+
+    #[test]
+    fn semantic_tokens_heading_shows_tags_not_stylings() {
+        // A heading's tag column is tokenized, but its body shows no stylings.
+        let abs = abs_positions(&semantic_tokens_of("List: @priority(high)\n"));
+        assert_eq!(abs.len(), 3);
+        assert_eq!(abs[0], (0, 0, 4, tt::TODO_HEADING_CONTENT, 0)); // "List"
+        assert_eq!(abs[1], (0, 4, 1, tt::TODO_HEADING_SYMBOL, 0)); // ":"
+        assert_eq!(abs[2], (0, 6, 15, tt::TODO_TAG, 0)); // "@priority(high)"
+    }
+
+    #[test]
+    fn semantic_tokens_non_tag_suffix_is_task_line() {
+        // SPEC 見出し行: after the colon must come nothing or a tag column.
+        // `List: **bold**` is therefore a task line and its styling shows.
+        let abs = abs_positions(&semantic_tokens_of("List: **bold**\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 6, 8, tt::TODO_BOLD, 0));
+        // Same for `Foo: @a b` — the tag is mid-line, so no heading, no tag.
+        let tokens = semantic_tokens_of("Foo: @a b\n");
+        assert!(tokens.is_empty(), "got {tokens:?}");
+    }
+
+    #[test]
+    fn semantic_tokens_done_with_trailing_text_is_plain() {
+        // SPEC タグ列: tags live at the line end. `@done` followed by more
+        // text is body text, so the line is not grayed and emits nothing.
+        let tokens = semantic_tokens_of("task @done trailing\n");
+        assert!(tokens.is_empty(), "got {tokens:?}");
+    }
+
+    #[test]
+    fn semantic_tokens_done_at_eol_is_grayed() {
+        // SPEC 灰色行: a line whose tag column has @done is grayed, whether
+        // or not text follows the tag.
+        let abs = abs_positions(&semantic_tokens_of("task @done\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 10, tt::TODO_LINE, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_cancelled_grayed_italic() {
+        let abs = abs_positions(&semantic_tokens_of("call mom @cancelled(2024-01-01)\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 31, tt::TODO_LINE, tm::ITALIC));
+    }
+
+    #[test]
+    fn semantic_tokens_cancelled_at_eol_is_grayed_italic() {
+        let abs = abs_positions(&semantic_tokens_of("task @cancelled\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 15, tt::TODO_LINE, tm::ITALIC));
+    }
+
+    #[test]
+    fn semantic_tokens_hide_grayed() {
+        let abs = abs_positions(&semantic_tokens_of("task @hide\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 10, tt::TODO_LINE, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_precedence_done_beats_cancelled() {
+        // First-listed wins; done has no italic even though @cancelled exists.
+        let abs = abs_positions(&semantic_tokens_of("task @cancelled @done\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 21, tt::TODO_LINE, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_archive() {
+        let abs = abs_positions(&semantic_tokens_of("Archive:\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 8, tt::TODO_LINE, 0));
+        // An indented Archive: heading is still recognized...
+        let abs = abs_positions(&semantic_tokens_of("  Archive: @done\n"));
+        assert_eq!(abs.len(), 1);
+        // ...and the Archive rule outranks @done (no italic).
+        assert_eq!(abs[0], (0, 0, 16, tt::TODO_LINE, 0));
+        // A suffix that is not a tag column is not an Archive heading.
+        let tokens = semantic_tokens_of("  Archive: old stuff\n");
+        assert!(tokens.is_empty(), "got {tokens:?}");
+    }
+
+    #[test]
+    fn semantic_tokens_queue_tiers() {
+        // Only @queue(1) gets the yellow tier.
+        let abs = abs_positions(&semantic_tokens_of("@queue(1)\n"));
+        assert_eq!(abs[0], (0, 0, 9, tt::TODO_TAG, tm::QUEUE1));
+        for input in ["@queue(2)\n", "@queue(3)\n", "@queue(9)\n"] {
+            let abs = abs_positions(&semantic_tokens_of(input));
+            assert_eq!(abs[0], (0, 0, 9, tt::TODO_TAG, 0), "for {input:?}");
         }
     }
 
     #[test]
-    fn semantic_tokens_heading_alone_strips_trailing_newline() {
-        // heading_line ends with $._newline, so the node spans into the next
-        // row. Token length must be the line content only (6 for "Inbox:"),
-        // not 7 — this verifies the trailing-newline stripping in
-        // `semantic_tokens`.
-        let tokens = semantic_tokens_of("Inbox:\n");
-        assert_eq!(tokens.len(), 1);
-        let t = &tokens[0];
-        assert_eq!(
-            (t.delta_line, t.delta_start, t.length, t.token_type),
-            (0, 0, 6, 0)
-        );
+    fn semantic_tokens_generic_tag() {
+        // A generic tag's range spans the entire @name(arg).
+        let abs = abs_positions(&semantic_tokens_of("task @priority(high)\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 5, 15, tt::TODO_TAG, 0));
     }
 
     #[test]
-    fn semantic_tokens_tag_arg_included_in_range() {
-        // Pins the grammar contract: a tag with an arg spans @name(arg) fully.
-        // "task @done(2024-01-01)\n" -> tag at col 5, length 17.
-        let tokens = semantic_tokens_of("task @done(2024-01-01)\n");
-        assert_eq!(tokens.len(), 1);
-        let t = &tokens[0];
-        assert_eq!(
-            (t.delta_line, t.delta_start, t.length, t.token_type),
-            (0, 5, 17, 1)
-        );
-    }
-
-    #[test]
-    fn semantic_tokens_tag_without_arg() {
-        // "review @done\n" -> tag at col 7, length 5 ("@done").
-        let tokens = semantic_tokens_of("review @done\n");
-        assert_eq!(tokens.len(), 1);
-        let t = &tokens[0];
-        assert_eq!(
-            (t.delta_line, t.delta_start, t.length, t.token_type),
-            (0, 7, 5, 1)
-        );
+    fn semantic_tokens_at_in_text_is_not_tagged() {
+        // SPEC 文書構造: an `@` outside the line-end tag column is body text
+        // and gets no tag token.
+        let tokens = semantic_tokens_of("email user@example.com\n");
+        assert!(tokens.is_empty(), "got {tokens:?}");
+        // Only the tag column token is highlighted; `a@b` stays body text.
+        let abs = abs_positions(&semantic_tokens_of("send to a@b @priority(high)\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 12, 15, tt::TODO_TAG, 0));
     }
 
     #[test]
     fn semantic_tokens_multiple_tags_same_line_delta_encoded() {
         // Two tags on one line: the second token's delta_start is relative to
         // the first token's start (same row), not absolute.
-        // "task @a @b\n" -> @a at col 5 len 2, @b at col 8 len 2.
         let tokens = semantic_tokens_of("task @a @b\n");
         assert_eq!(tokens.len(), 2);
-        let first = &tokens[0];
-        let second = &tokens[1];
-        assert_eq!(
-            (first.delta_line, first.delta_start, first.length, first.token_type),
-            (0, 5, 2, 1)
-        );
+        assert_eq!(token_tuple(&tokens[0]), (0, 5, 2, tt::TODO_TAG, 0));
         // delta_start = col2 - col1 = 8 - 5 = 3
-        assert_eq!(
-            (second.delta_line, second.delta_start, second.length, second.token_type),
-            (0, 3, 2, 1)
-        );
+        assert_eq!(token_tuple(&tokens[1]), (0, 3, 2, tt::TODO_TAG, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_bold_italic_code_url() {
+        let abs = abs_positions(&semantic_tokens_of("**bold**\n"));
+        assert_eq!(abs[0], (0, 0, 8, tt::TODO_BOLD, 0));
+        let abs = abs_positions(&semantic_tokens_of("*italic*\n"));
+        assert_eq!(abs[0], (0, 0, 8, tt::TODO_ITALIC, 0));
+        let abs = abs_positions(&semantic_tokens_of("`code`\n"));
+        assert_eq!(abs[0], (0, 0, 6, tt::TODO_CODE, 0));
+        let abs = abs_positions(&semantic_tokens_of("<https://example.com>\n"));
+        assert_eq!(abs[0], (0, 0, 21, tt::TODO_URL, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_bold_then_italic_ordering() {
+        // Bold is tried before italic, so `**b**` is bold then `*i*` is italic.
+        let abs = abs_positions(&semantic_tokens_of("**b** *i*\n"));
+        assert_eq!(abs.len(), 2);
+        assert_eq!(abs[0], (0, 0, 5, tt::TODO_BOLD, 0));
+        assert_eq!(abs[1], (0, 6, 3, tt::TODO_ITALIC, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_code_double_backtick() {
+        // A double-backtick fence allows a single backtick inside its content.
+        let abs = abs_positions(&semantic_tokens_of("``a`b``\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 7, tt::TODO_CODE, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_start_tag_modifiers() {
+        let now = fixed_now();
+        let abs = abs_positions(&tokens_at("@start(2000-01-01)\n", now));
+        assert_eq!(abs[0], (0, 0, 18, tt::START_TAG, tm::PAST));
+        let abs = abs_positions(&tokens_at("@start(2100-01-01)\n", now));
+        assert_eq!(abs[0], (0, 0, 18, tt::START_TAG, tm::FUTURE));
+        let abs = abs_positions(&tokens_at("@start(foo)\n", now));
+        assert_eq!(abs[0], (0, 0, 11, tt::START_TAG, tm::INVALID));
+    }
+
+    #[test]
+    fn semantic_tokens_due_tag_modifiers() {
+        let now = fixed_now();
+        let abs = abs_positions(&tokens_at("@due(2000-01-01)\n", now));
+        assert_eq!(abs[0], (0, 0, 16, tt::DUE_TAG, tm::PAST));
+        let abs = abs_positions(&tokens_at("@due(2100-01-01)\n", now));
+        assert_eq!(abs[0], (0, 0, 16, tt::DUE_TAG, tm::FUTURE));
+        let abs = abs_positions(&tokens_at("@due(foo)\n", now));
+        assert_eq!(abs[0], (0, 0, 9, tt::DUE_TAG, tm::INVALID));
+    }
+
+    #[test]
+    fn semantic_tokens_now_boundary_is_past() {
+        // parsed == now counts as Past (inclusive boundary).
+        let now = fixed_now();
+        let abs = abs_positions(&tokens_at("@start(2024-06-15 12:00)\n", now));
+        assert_eq!(abs[0], (0, 0, 24, tt::START_TAG, tm::PAST));
+    }
+
+    #[test]
+    fn semantic_tokens_seconds_format_is_invalid() {
+        // SPEC 期限タグ: dates are `YYYY-MM-DD` or `YYYY-MM-DD HH:mm` — a
+        // seconds field makes the date unparseable (red + underline).
+        let now = fixed_now();
+        let abs = abs_positions(&tokens_at("@start(2024-06-15 12:00:00)\n", now));
+        assert_eq!(abs[0], (0, 0, 27, tt::START_TAG, tm::INVALID));
+    }
+
+    #[test]
+    fn semantic_tokens_grayed_suppresses_date_tag() {
+        // A grayed line emits only the todo-line; the @due tag is suppressed.
+        let abs = abs_positions(&semantic_tokens_of("task @done @due(2100-01-01)\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 27, tt::TODO_LINE, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_repeat_valid_invalid() {
+        let abs = abs_positions(&semantic_tokens_of("@repeat(0 0 * * *)\n"));
+        assert_eq!(abs[0], (0, 0, 18, tt::REPEAT_TAG, tm::VALID));
+        let abs = abs_positions(&semantic_tokens_of("@repeat(notacron)\n"));
+        assert_eq!(abs[0], (0, 0, 17, tt::REPEAT_TAG, tm::INVALID));
+    }
+
+    #[test]
+    fn semantic_tokens_non_ascii_byte_columns() {
+        // Columns are UTF-8 byte offsets (offsetEncoding utf-8).
+        let abs = abs_positions(&semantic_tokens_of("タスク @a\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 10, 2, tt::TODO_TAG, 0));
     }
 
     #[test]
     fn semantic_tokens_hash_line_emits_no_token() {
-        // A `#`-prefixed line is a task_line with only a text child. No query
-        // capture matches (highlights.scm captures heading_line and tag only),
-        // so zero semantic tokens are emitted.
+        // A `#`-prefixed line is plain task text with no tags/stylings.
         let tokens = semantic_tokens_of("# just a note\n");
         assert!(tokens.is_empty(), "got {tokens:?}");
+    }
+
+    #[test]
+    fn document_links_closed_urls_and_display_precedence() {
+        let links = document_links(b"see <https://example.com> <ftp://example.org/path>\n");
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].range.start, Position::new(0, 4));
+        assert_eq!(links[0].range.end, Position::new(0, 25));
+        assert_eq!(
+            links[0].target.as_ref().unwrap().to_string(),
+            "https://example.com"
+        );
+        assert_eq!(
+            links[1].target.as_ref().unwrap().to_string(),
+            "ftp://example.org/path"
+        );
+        // Unclosed URLs and URLs in gray lines do not expose individual links.
+        assert!(document_links(b"see <http://example.com\n").is_empty());
+        assert!(document_links(b"see <http://example.com> @done\n").is_empty());
+    }
+
+    #[test]
+    fn semantic_tokens_cron_l_w_hash_extensions_are_valid() {
+        // SPEC 繰り返しタグ: cron式は5フィールドで `L` `#` `W` 拡張を受理する.
+        for input in [
+            "@repeat(0 0 * * 5L)\n",
+            "@repeat(0 0 1W * *)\n",
+            "@repeat(0 0 * * 1#1)\n",
+        ] {
+            let abs = abs_positions(&semantic_tokens_of(input));
+            assert_eq!(abs.len(), 1, "for {input:?}");
+            assert_eq!(abs[0].3, tt::REPEAT_TAG, "for {input:?}");
+            assert_eq!(abs[0].4, tm::VALID, "for {input:?}");
+        }
     }
 }

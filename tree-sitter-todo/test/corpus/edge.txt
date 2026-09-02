@@ -8,9 +8,10 @@ task b
 ---
 
 (source_file
-  (task_line (text))
-  (task_line (text))
-)
+  (task_line
+    (text))
+  (task_line
+    (text)))
 
 ===
 Leading blank lines
@@ -21,8 +22,8 @@ task
 ---
 
 (source_file
-  (task_line (text))
-)
+  (task_line
+    (text)))
 
 ===
 Trailing blank lines
@@ -34,32 +35,44 @@ task
 ---
 
 (source_file
-  (task_line (text))
-)
+  (task_line
+    (text)))
 
 ===
-Line with only tags (empty text)
+Line with only tags is an error
 ===
 
 @done
 ---
 
 (source_file
-  (task_line (tag (name)))
-)
+  (ERROR
+    (UNEXPECTED 'd')))
 
 ===
-Header with empty text and a tag
+Header without text is an error
+===
+
+:
+---
+
+(source_file
+  (ERROR
+    (colon)))
+
+===
+Header with only a tag is an error
 ===
 
 : @done
 ---
 
 (source_file
-  (heading_block
-    (heading_line (colon) (tag (name)))
-  )
-)
+  (ERROR
+    (colon)
+    (indent)
+    (dedent)
+    (UNEXPECTED 'd')))
 
 ===
 Colon in text body is not a header
@@ -69,8 +82,8 @@ time is 12:30
 ---
 
 (source_file
-  (task_line (text))
-)
+  (task_line
+    (text)))
 
 ===
 Url in text body
@@ -80,8 +93,8 @@ see http://example.com for details
 ---
 
 (source_file
-  (task_line (text))
-)
+  (task_line
+    (text)))
 
 ===
 Argument containing colon
@@ -91,5 +104,8 @@ task @time(12:30)
 ---
 
 (source_file
-  (task_line (text) (tag (name) (arg)))
-)
+  (task_line
+    (text)
+    (tag
+      (name)
+      (arg))))

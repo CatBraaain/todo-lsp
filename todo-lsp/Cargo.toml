@@ -16,3 +16,10 @@ tree-sitter = { workspace = true }
 tree-sitter-todo = { workspace = true }
 serde_json = "1"
 anyhow = "1"
+# Date parsing for @start/@due tag classification. `clock` provides Utc::now().
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+# Cron expression validation for @repeat tags. `croner` (not `cron`) is used
+# because it accepts the standard 5-field UNIX cron the reference uses
+# (`@repeat(0 0 * * *)`) plus `L` and `#` extensions — the `cron` crate
+# requires a leading seconds field and would reject those.
+croner = "3"

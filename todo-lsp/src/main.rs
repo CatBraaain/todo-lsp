@@ -1,6 +1,11 @@
 mod analysis;
+mod archive;
+mod commands;
+mod format;
+mod line;
 mod lsp;
 mod parse;
+mod repeat;
 
 use tower_lsp_server::{LspService, Server};
 

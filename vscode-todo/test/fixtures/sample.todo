@@ -1,9 +1,10 @@
 Inbox:
-  buy milk
-  call mom @done(2024-01-01)
-  Project:
-    draft spec @priority(high)
-    review @done
-  wrap up
+    buy milk
+    call mom @done(2024-01-01)
+    Project:
+        draft spec @priority(high)
+        review @done
+    wrap up
+
 Archive:
-  old task
+    old task @done(2024-01-01)

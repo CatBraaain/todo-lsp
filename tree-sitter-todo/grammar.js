@@ -3,11 +3,9 @@
 
 export default grammar({
   name: "todo",
-  // `#` is NOT a comment in this language: a `#`-prefixed line is a normal
-  // task whose text happens to start with `#`. The external scanner consumes
-  // the whole line (including any leading `#`) as a single `text` token, so
-  // no comment node is ever produced. See GRAMMAR.md and parse.rs test
-  // `hash_line_is_task_text`.
+  // A `#`-prefixed line is a normal task, not a comment. See the root
+  // SPEC.md for the language contract and the `hash_line_is_task_text`
+  // test for regression coverage.
   extras: () => [/[ \t]/],
   externals: ($) => [$._newline, $.indent, $.dedent, $.text],
   rules: {
@@ -17,20 +15,14 @@ export default grammar({
       seq($.heading_line, optional(seq($.indent, $.task_block, $.dedent))),
 
     heading_line: ($) =>
-      prec(1, prec.left(seq(field("text", optional($.text)), $.colon, repeat($.tag), $._newline))),
+      prec(1, prec.left(seq(field("text", $.text), $.colon, repeat($.tag), $._newline))),
 
     colon: () => ":",
 
     task_block: ($) => repeat1(choice($.heading_block, $.task_line)),
 
     task_line: ($) =>
-      prec(1, prec.left(seq(
-        choice(
-          seq(field("text", $.text), repeat($.tag)),
-          repeat1($.tag)
-        ),
-        $._newline
-      ))),
+      prec(1, prec.left(seq(field("text", $.text), repeat($.tag), $._newline))),
 
     tag: ($) => seq("@", field("name", $.name), optional(field("arg", $.arg))),
     name: () => token(/[^\s(]+/),

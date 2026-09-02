@@ -120,3 +120,45 @@ A:
     (dedent)
   )
 )
+
+===
+Tab and four spaces are the same level
+===
+
+A:
+    spaced
+	tabbed
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text))
+      (task_line (text))
+    )
+    (dedent)
+  )
+)
+
+===
+Three spaces plus tab is one level
+===
+
+A:
+    spaced
+   	merged
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text))
+      (task_line (text))
+    )
+    (dedent)
+  )
+)

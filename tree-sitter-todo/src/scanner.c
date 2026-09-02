@@ -221,11 +221,21 @@ bool tree_sitter_todo_external_scanner_scan(void *payload, TSLexer *lexer, const
 
   // 行頭空白で INDENT / DEDENT。scan 開始位置を mark_end で固定してゼロ幅にし、
   // 次の scan が同じ行頭から indent_length を再計算できるようにする。
+  // インデント単位は SPEC.md のインデントレベル定義に合わせる:
+  // 1レベル = スペース4個。タブは直前のスペース3個までと合わせて
+  // 1レベル（次の4の倍数へ進む）として数える。
   lexer->mark_end(lexer);
   uint16_t indent_length = 0;
   while (lexer->lookahead == ' ' || lexer->lookahead == '\t')
   {
-    indent_length += (lexer->lookahead == '\t') ? 8 : 1;
+    if (lexer->lookahead == '\t')
+    {
+      indent_length = (uint16_t)(((indent_length / 4) + 1) * 4);
+    }
+    else
+    {
+      indent_length += 1;
+    }
     skip(lexer);
   }
   if (scanner->indents.size > 0)
@@ -241,7 +251,7 @@ bool tree_sitter_todo_external_scanner_scan(void *payload, TSLexer *lexer, const
 
     if (valid_symbols[DEDENT] && indent_length < current_indent_length)
     {
-      array_pop(&scanner->indents);
+      (void)array_pop(&scanner->indents);
       lexer->result_symbol = DEDENT;
       return true;
     }

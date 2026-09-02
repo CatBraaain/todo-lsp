@@ -32,7 +32,7 @@
     "fields": {
       "text": {
         "multiple": false,
-        "required": false,
+        "required": true,
         "types": [
           {
             "type": "text",
@@ -127,7 +127,7 @@
     "fields": {
       "text": {
         "multiple": false,
-        "required": false,
+        "required": true,
         "types": [
           {
             "type": "text",

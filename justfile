@@ -25,6 +25,7 @@ build-vscode:
 
 test:
   cargo test --workspace
+  cd vscode-todo && npm test
 
 [working-directory("tree-sitter-todo")]
 generate-grammar:

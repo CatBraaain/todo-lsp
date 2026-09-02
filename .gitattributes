@@ -1,5 +1,9 @@
 * text=auto eol=lf
 
+# Corpus includes a SPEC-mandated indentation case: 3 spaces followed by a
+# tab counts as one level.
+tree-sitter-todo/test/corpus/indent.txt whitespace=-space-before-tab
+
 # Generated source files
 src/*.json linguist-generated
 src/parser.c linguist-generated
