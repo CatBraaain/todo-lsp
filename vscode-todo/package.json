@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "publisher": "todo-lsp",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CatBraaain/todo-lsp.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
