@@ -1,6 +1,7 @@
 mod analysis;
 mod archive;
 mod commands;
+mod edits;
 mod format;
 mod line;
 mod lsp;

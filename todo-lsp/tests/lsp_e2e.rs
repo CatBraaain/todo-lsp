@@ -26,6 +26,8 @@ mod harness {
         next_id: i64,
         /// Params of the last `workspace/applyEdit` request the server sent.
         pub last_apply_edit: Option<Value>,
+        /// Number of `workspace/semanticTokens/refresh` requests received.
+        pub refresh_count: usize,
     }
 
     impl LspSession {
@@ -68,6 +70,7 @@ mod harness {
                 rx,
                 next_id: 1,
                 last_apply_edit: None,
+                refresh_count: 0,
             }
         }
 
@@ -134,23 +137,70 @@ mod harness {
             }
         }
 
-        /// Answer a server-to-client request (`workspace/applyEdit`). Returns
-        /// whether the message was one (and was answered).
+        /// Answer a server-to-client request (`workspace/applyEdit`,
+        /// `workspace/semanticTokens/refresh`). Returns whether the message
+        /// was one (and was answered).
         fn answer_server_request(&mut self, msg: &Value) -> bool {
-            if msg.get("method").and_then(|v| v.as_str()) != Some("workspace/applyEdit")
-                || msg.get("id").is_none()
-            {
+            let method = msg.get("method").and_then(|v| v.as_str());
+            if msg.get("id").is_none() {
                 return false;
             }
-            self.last_apply_edit = msg.get("params").cloned();
+            match method {
+                Some("workspace/applyEdit") => {
+                    self.last_apply_edit = msg.get("params").cloned();
+                }
+                Some("workspace/semanticTokens/refresh") => {
+                    self.refresh_count += 1;
+                }
+                _ => return false,
+            }
             let response = json!({
                 "jsonrpc": "2.0",
                 "id": msg["id"],
-                "result": { "applied": true },
+                "result": if method == Some("workspace/applyEdit") {
+                    json!({ "applied": true })
+                } else {
+                    json!(null)
+                },
             });
             write_msg(&mut self.stdin, &response);
             self.stdin.flush().unwrap();
             true
+        }
+
+        /// Wait until one more `workspace/semanticTokens/refresh` arrives
+        /// (answered inline).
+        pub fn await_refresh(&mut self) {
+            let start = self.refresh_count;
+            let deadline = Instant::now() + TIMEOUT;
+            loop {
+                if self.refresh_count > start {
+                    return;
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let msg = self
+                    .rx
+                    .recv_timeout(remaining)
+                    .expect("timeout waiting for semanticTokens/refresh");
+                self.answer_server_request(&msg);
+            }
+        }
+
+        /// Assert that no further refresh request arrives within `duration`
+        /// (messages are still drained and answered).
+        pub fn assert_no_refresh_for(&mut self, duration: Duration) {
+            let start = self.refresh_count;
+            let deadline = Instant::now() + duration;
+            while Instant::now() < deadline {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if let Ok(msg) = self.rx.recv_timeout(remaining.min(Duration::from_millis(50))) {
+                    self.answer_server_request(&msg);
+                }
+            }
+            assert_eq!(
+                self.refresh_count, start,
+                "unexpected semanticTokens/refresh"
+            );
         }
 
         pub fn shutdown_and_exit(&mut self) {
@@ -211,6 +261,7 @@ mod harness {
 
 use harness::LspSession;
 use serde_json::{json, Value};
+use std::time::Duration;
 
 const SAMPLE_URI: &str = "file:///tmp/sample.todo";
 
@@ -287,9 +338,9 @@ fn full_handshake_with_clean_sample() {
         );
     }
     assert_eq!(
-        st["full"].as_bool(),
+        st["full"]["delta"].as_bool(),
         Some(true),
-        "semanticTokens full=true must be advertised",
+        "semanticTokens full.delta=true must be advertised: {st:?}",
     );
     // §フォーマット. Commands are registered by the VS Code extension, which
     // supplies the active document URI and selected lines before sending the
@@ -351,11 +402,16 @@ fn full_handshake_with_clean_sample() {
     assert_eq!(folds[0]["endLine"].as_i64().unwrap(), 6);
 
     // 7. semanticTokens/full: 2 headings x2 + 1 tag + 2 gray lines + archive.
+    //    The response carries a resultId (色付けの更新).
     let id = s.send_request(
         "textDocument/semanticTokens/full",
         json!({ "textDocument": { "uri": SAMPLE_URI } }),
     );
     let resp = s.await_response(id);
+    assert!(
+        resp["result"]["resultId"].as_str().is_some_and(|r| !r.is_empty()),
+        "full response must carry a resultId: {resp}"
+    );
     let data = resp["result"]["data"]
         .as_array()
         .expect("semanticTokens data array");
@@ -486,9 +542,10 @@ fn formatting_returns_full_document_edit() {
     s.shutdown_and_exit();
 }
 
-/// §コマンド: `todo-language.toggleDone` applies a workspace edit that adds
-/// `@done(実行日)` to the selected line; the server sends `workspace/applyEdit`
-/// and the client-applied result flows back as the command result.
+/// §コマンド: `todo-language.toggleDone` applies a line-limited workspace
+/// edit that adds `@done(実行日)` to the selected line; the server sends
+/// `workspace/applyEdit` and the client-applied result flows back as the
+/// command result.
 #[test]
 fn execute_command_toggle_done_applies_edit() {
     let mut s = LspSession::spawn();
@@ -527,14 +584,20 @@ fn execute_command_toggle_done_applies_edit() {
     let changes = apply["edit"]["changes"][SAMPLE_URI]
         .as_array()
         .expect("changes for the document");
-    assert_eq!(changes.len(), 1);
-    let new_text = changes[0]["newText"].as_str().unwrap();
+    assert_eq!(changes.len(), 1, "one line-limited edit: {changes:?}");
+    let edit = &changes[0];
+    // §コマンド: the edit covers only line 1 — not a full-document replace.
+    assert_eq!(edit["range"]["start"]["line"], 1);
+    assert_eq!(edit["range"]["start"]["character"], 0);
+    assert_eq!(edit["range"]["end"]["line"], 1);
+    assert_eq!(edit["range"]["end"]["character"], 6); // "task b" byte length
+    let new_text = edit["newText"].as_str().unwrap();
     assert!(
-        new_text.starts_with("task a\ntask b @done("),
+        new_text.starts_with("task b @done("),
         "got {new_text:?}"
     );
     assert!(
-        new_text.ends_with(")\n"),
+        new_text.ends_with(")"),
         "実行日 must be a YYYY-MM-DD argument: {new_text:?}"
     );
 
@@ -575,10 +638,18 @@ fn execute_command_archive_creates_archive_heading() {
     assert!(resp.get("result").is_some());
 
     let apply = s.last_apply_edit.as_ref().expect("applyEdit was sent");
-    let new_text = apply["edit"]["changes"][SAMPLE_URI][0]["newText"]
-        .as_str()
-        .unwrap();
-    assert_eq!(new_text, "keep\nArchive:\n    old @done\n");
+    let changes = apply["edit"]["changes"][SAMPLE_URI]
+        .as_array()
+        .expect("changes for the document");
+    assert_eq!(changes.len(), 1);
+    let edit = &changes[0];
+    // Line 1 ("old @done") is replaced by the Archive heading + indented
+    // block (with §フォーマット's blank line before the heading); line 0
+    // ("keep") is untouched.
+    assert_eq!(edit["range"]["start"]["line"], 1);
+    assert_eq!(edit["range"]["end"]["line"], 1);
+    assert_eq!(edit["range"]["end"]["character"], 9);
+    assert_eq!(edit["newText"].as_str().unwrap(), "\nArchive:\n    old @done");
 
     s.shutdown_and_exit();
 }
@@ -617,10 +688,16 @@ fn execute_command_indent_writes_four_spaces() {
     assert!(resp.get("result").is_some());
 
     let apply = s.last_apply_edit.as_ref().expect("applyEdit was sent");
-    let new_text = apply["edit"]["changes"][SAMPLE_URI][0]["newText"]
-        .as_str()
-        .unwrap();
-    assert_eq!(new_text, "    a\nb\n");
+    let changes = apply["edit"]["changes"][SAMPLE_URI]
+        .as_array()
+        .expect("changes for the document");
+    assert_eq!(changes.len(), 1);
+    let edit = &changes[0];
+    assert_eq!(edit["range"]["start"]["line"], 0);
+    assert_eq!(edit["range"]["start"]["character"], 0);
+    assert_eq!(edit["range"]["end"]["line"], 0);
+    assert_eq!(edit["range"]["end"]["character"], 1);
+    assert_eq!(edit["newText"].as_str().unwrap(), "    a");
 
     s.shutdown_and_exit();
 }
@@ -723,6 +800,234 @@ fn document_link_returns_closed_url_target() {
     assert_eq!(links[0]["target"].as_str(), Some("https://example.com"));
     assert_eq!(links[0]["range"]["start"]["line"], 0);
     assert_eq!(links[0]["range"]["start"]["character"], 4);
+
+    s.shutdown_and_exit();
+}
+
+/// 色付けの更新: full responses carry a resultId; a delta request with the
+/// previous resultId returns token edits that reconstruct the fresh full
+/// data; an unknown resultId falls back to the full data.
+#[test]
+fn semantic_tokens_delta_roundtrip() {
+    let mut s = LspSession::spawn();
+    let init_id = s.send_request(
+        "initialize",
+        json!({ "processId": null, "rootUri": null, "capabilities": {} }),
+    );
+    let _ = s.await_response(init_id);
+    s.send_notification("initialized", json!({}));
+
+    s.send_notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": SAMPLE_URI, "languageId": "todo", "version": 1,
+                "text": "List:\ntask b\n",
+            }
+        }),
+    );
+    let _ = s.await_notification("textDocument/publishDiagnostics");
+
+    let full = |s: &mut LspSession| -> (String, Vec<i64>) {
+        let id = s.send_request(
+            "textDocument/semanticTokens/full",
+            json!({ "textDocument": { "uri": SAMPLE_URI } }),
+        );
+        let resp = s.await_response(id);
+        let rid = resp["result"]["resultId"]
+            .as_str()
+            .expect("resultId on full response")
+            .to_string();
+        let data = resp["result"]["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_i64().unwrap())
+            .collect();
+        (rid, data)
+    };
+
+    let (rid1, data1) = full(&mut s);
+    // Heading "List" + ":" — two tokens, ten numbers.
+    assert_eq!(data1, vec![0, 0, 4, 1, 0, 0, 4, 1, 2, 0]);
+
+    // Mark line 1 done; the delta against rid1 is a pure append of the
+    // whole-line gray token.
+    s.send_notification(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": SAMPLE_URI, "version": 2 },
+            "contentChanges": [{ "text": "List:\ntask b @done(2024-01-01)\n" }],
+        }),
+    );
+    let _ = s.await_notification("textDocument/publishDiagnostics");
+
+    let id = s.send_request(
+        "textDocument/semanticTokens/full/delta",
+        json!({
+            "textDocument": { "uri": SAMPLE_URI },
+            "previousResultId": rid1,
+        }),
+    );
+    let delta = s.await_response(id);
+    let edits = delta["result"]["edits"]
+        .as_array()
+        .expect("delta response must carry edits");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0]["start"], 10);
+    assert_eq!(edits[0]["deleteCount"], 0);
+    assert_eq!(
+        edits[0]["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        vec![1, 0, 24, 0, 0],
+        "appended todo-line token for the gray line"
+    );
+    let rid2 = delta["result"]["resultId"].as_str().unwrap();
+    assert_ne!(rid1, rid2, "each response gets a fresh resultId");
+
+    // Reconstructing: full data now must equal data1 + the appended token.
+    let (_rid3, data3) = full(&mut s);
+    assert_eq!(
+        data3,
+        vec![0, 0, 4, 1, 0, 0, 4, 1, 2, 0, 1, 0, 24, 0, 0],
+        "fresh full data must match the delta reconstruction"
+    );
+
+    // Unknown resultId -> full fallback (data, no edits).
+    let id = s.send_request(
+        "textDocument/semanticTokens/full/delta",
+        json!({
+            "textDocument": { "uri": SAMPLE_URI },
+            "previousResultId": "todo-999999",
+        }),
+    );
+    let fallback = s.await_response(id);
+    assert!(
+        fallback["result"].get("edits").is_none(),
+        "unknown resultId must not produce edits: {fallback}"
+    );
+    assert_eq!(
+        fallback["result"]["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        data3,
+        "unknown resultId returns the full token data"
+    );
+
+    s.shutdown_and_exit();
+}
+
+/// 色付けの更新: after a command edit is applied (the didChange flowing
+/// back), the server asks supporting clients to recalculate exactly once —
+/// and never for a plain client edit.
+#[test]
+fn toggle_done_refreshes_tokens_once() {
+    let mut s = LspSession::spawn();
+    let init_id = s.send_request(
+        "initialize",
+        json!({
+            "processId": null, "rootUri": null,
+            "capabilities": {
+                "workspace": { "semanticTokens": { "refreshSupport": true } }
+            }
+        }),
+    );
+    let _ = s.await_response(init_id);
+    s.send_notification("initialized", json!({}));
+
+    let open = |s: &mut LspSession, version, text| {
+        s.send_notification(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": SAMPLE_URI, "version": version },
+                "contentChanges": [{ "text": text }],
+            }),
+        );
+    };
+
+    s.send_notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": SAMPLE_URI, "languageId": "todo", "version": 1, "text": "task a\n",
+            }
+        }),
+    );
+    let _ = s.await_notification("textDocument/publishDiagnostics");
+
+    let id = s.send_request(
+        "workspace/executeCommand",
+        json!({
+            "command": "todo-language.toggleDone",
+            "arguments": [SAMPLE_URI, [0]],
+        }),
+    );
+    let _ = s.await_response(id);
+    assert!(s.last_apply_edit.is_some(), "applyEdit was sent");
+
+    // The client applies the edit and the new text flows back as didChange.
+    open(&mut s, 2, "task a @done(2024-01-01)\n");
+    let _ = s.await_notification("textDocument/publishDiagnostics");
+    s.await_refresh();
+    assert_eq!(s.refresh_count, 1, "exactly one refresh after the edit");
+
+    // A plain client edit (typing) must not refresh again.
+    open(&mut s, 3, "task a @done(2024-01-01) more\n");
+    let _ = s.await_notification("textDocument/publishDiagnostics");
+    s.assert_no_refresh_for(Duration::from_millis(300));
+    assert_eq!(s.refresh_count, 1);
+
+    s.shutdown_and_exit();
+}
+
+/// 色付けの更新: clients that did not advertise `refreshSupport` never get a
+/// refresh request.
+#[test]
+fn no_refresh_without_client_support() {
+    let mut s = LspSession::spawn();
+    let init_id = s.send_request(
+        "initialize",
+        json!({ "processId": null, "rootUri": null, "capabilities": {} }),
+    );
+    let _ = s.await_response(init_id);
+    s.send_notification("initialized", json!({}));
+
+    s.send_notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": SAMPLE_URI, "languageId": "todo", "version": 1, "text": "task a\n",
+            }
+        }),
+    );
+    let _ = s.await_notification("textDocument/publishDiagnostics");
+
+    let id = s.send_request(
+        "workspace/executeCommand",
+        json!({
+            "command": "todo-language.toggleDone",
+            "arguments": [SAMPLE_URI, [0]],
+        }),
+    );
+    let _ = s.await_response(id);
+
+    s.send_notification(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": SAMPLE_URI, "version": 2 },
+            "contentChanges": [{ "text": "task a @done(2024-01-01)\n" }],
+        }),
+    );
+    let _ = s.await_notification("textDocument/publishDiagnostics");
+    s.assert_no_refresh_for(Duration::from_millis(300));
+    assert_eq!(s.refresh_count, 0);
 
     s.shutdown_and_exit();
 }

@@ -1,8 +1,8 @@
 //! §コマンド — tag toggles, queue numbering, and indent / dedent.
 //!
 //! All operations are pure `text × selection -> text` functions; the LSP
-//! layer applies the result as a full-document edit. Selections are 0-based
-//! line numbers (the union of the editor's selection ranges).
+//! layer applies the result as line-limited workspace edits. Selections are
+//! 0-based line numbers (the union of the editor's selection ranges).
 
 use chrono::NaiveDate;
 
