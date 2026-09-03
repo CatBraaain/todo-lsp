@@ -2,14 +2,16 @@
 //! under the root-level `Archive:` heading; Unarchive (Alt+Shift+A) moves
 //! all-gray blocks under `Archive:` back to the document end.
 
-use crate::format::split_lines;
+use crate::format::{format_document, split_lines};
 use crate::line;
 
-/// One structure line of the document. `units` is the indent measurement
-/// used for parent/child/sibling decisions.
+/// One structure line of the document. `units` is the relative indent
+/// measurement; `level` is the SPEC.md インデントレベル (`units / 4`) that
+/// decides block membership.
 struct Entry {
     line_idx: usize,
     units: usize,
+    level: usize,
 }
 
 /// Structure entries (non-blank lines) in document order.
@@ -22,20 +24,24 @@ fn entries(lines: &[String]) -> Vec<Entry> {
             p.is_structure().then_some(Entry {
                 line_idx: i,
                 units: p.units,
+                level: p.level,
             })
         })
         .collect()
 }
 
-/// Group entries into top-level blocks: a units-0 entry plus every deeper
-/// entry that follows it. Each block is the list of its member line indices.
+/// Group entries into top-level blocks: a level-0 entry (インデントレベル 0,
+/// including 1-3 leading spaces) plus every deeper entry that follows it.
+/// Lines before the first level-0 entry belong to no top-level block.
 fn top_level_blocks(lines: &[String]) -> Vec<Vec<usize>> {
     let mut blocks: Vec<Vec<usize>> = Vec::new();
     for e in entries(lines) {
-        if e.units == 0 || blocks.is_empty() {
+        if e.level == 0 {
             blocks.push(Vec::new());
         }
-        blocks.last_mut().unwrap().push(e.line_idx);
+        if let Some(block) = blocks.last_mut() {
+            block.push(e.line_idx);
+        }
     }
     blocks
 }
@@ -108,7 +114,9 @@ pub fn archive(text: &str, selection: &[usize]) -> String {
         out.push("Archive:".to_string());
         out.extend(shifted);
     }
-    join(&out, text)
+    // §フォーマット applies after Archive execution (the moved lines and
+    // the document as a whole are left in the canonical form).
+    format_document(&join(&out, text))
 }
 
 /// Move all-gray blocks directly under the root-level `Archive:` heading
@@ -122,20 +130,22 @@ pub fn unarchive(text: &str, selection: &[usize]) -> String {
     let Some(archive_idx) = archive_line else {
         return text.to_string();
     };
-    let archive_level = line::parse_line(&lines[archive_idx]).units;
     let end = block_end(&lines, archive_idx);
 
-    // Direct-child sub-blocks of the Archive block: entries one level deeper
-    // than the heading, each with its own descendants.
+    // Direct-child sub-blocks of the root `Archive:` block: entries exactly
+    // one level deeper (level 1), each with its own descendants. Deeper-only
+    // content below the heading belongs to no direct-child block.
     let mut sub_blocks: Vec<Vec<usize>> = Vec::new();
     for e in entries(&lines) {
         if e.line_idx <= archive_idx || e.line_idx > end {
             continue;
         }
-        if e.units == archive_level + 4 || sub_blocks.is_empty() {
+        if e.level == 1 {
             sub_blocks.push(Vec::new());
         }
-        sub_blocks.last_mut().unwrap().push(e.line_idx);
+        if let Some(block) = sub_blocks.last_mut() {
+            block.push(e.line_idx);
+        }
     }
 
     let moved: Vec<usize> = sub_blocks
@@ -172,7 +182,8 @@ pub fn unarchive(text: &str, selection: &[usize]) -> String {
         out.push(l.clone());
     }
     out.extend(appended);
-    join(&out, text)
+    // §フォーマット applies after Unarchive execution.
+    format_document(&join(&out, text))
 }
 
 fn root_archive_line(lines: &[String]) -> Option<usize> {
@@ -182,15 +193,16 @@ fn root_archive_line(lines: &[String]) -> Option<usize> {
     })
 }
 
-/// The last line index of the block headed by the line at `head_idx`.
+/// The last line index of the block headed by the line at `head_idx`:
+/// the head plus following entries at a deeper インデントレベル.
 fn block_end(lines: &[String], head_idx: usize) -> usize {
-    let head_units = line::parse_line(&lines[head_idx]).units;
+    let head_level = line::parse_line(&lines[head_idx]).level;
     let mut end = head_idx;
     for e in entries(lines) {
         if e.line_idx <= head_idx {
             continue;
         }
-        if e.units > head_units {
+        if e.level > head_level {
             end = e.line_idx;
         } else {
             break;
@@ -200,18 +212,18 @@ fn block_end(lines: &[String], head_idx: usize) -> usize {
 }
 
 /// The 0-based depth of a line within its top-level block (0 for the block
-/// head, 1 for its children, ...), derived from the relative indent chain.
+/// head, 1 for its children, ...), derived from the level chain.
 fn relative_depth(lines: &[String], idx: usize) -> usize {
-    let units = line::parse_line(&lines[idx]).units;
+    let level = line::parse_line(&lines[idx]).level;
     let mut depth = 0;
-    let mut cur = units;
+    let mut cur = level;
     for e in entries(lines).into_iter().rev() {
-        if e.line_idx >= idx || e.units >= units {
+        if e.line_idx >= idx || e.level >= level {
             continue;
         }
-        if e.units < cur {
+        if e.level < cur {
             depth += 1;
-            cur = e.units;
+            cur = e.level;
         }
     }
     depth
@@ -242,14 +254,14 @@ Archive:
         // Only top-level blocks can be archived: `a @done` is level 0.
         let input = "Inbox:\n    b\na @done\n";
         let out = archive(input, &[2]);
-        assert_eq!(out, "Inbox:\n    b\nArchive:\n    a @done\n");
+        assert_eq!(out, "Inbox:\n    b\n\nArchive:\n    a @done\n");
     }
 
     #[test]
     fn archive_into_existing_archive_block_end() {
         let input = "Inbox:\n    b\nArchive:\n    old @done\nc @done\n";
         let out = archive(input, &[4]);
-        assert_eq!(out, "Inbox:\n    b\nArchive:\n    old @done\n    c @done\n");
+        assert_eq!(out, "Inbox:\n    b\n\nArchive:\n    old @done\n    c @done\n");
     }
 
     #[test]
@@ -268,14 +280,14 @@ Archive:
     #[test]
     fn archive_creates_archive_heading_when_absent() {
         let out = archive("t\ndone task @cancelled\n", &[1]);
-        assert_eq!(out, "t\nArchive:\n    done task @cancelled\n");
+        assert_eq!(out, "t\n\nArchive:\n    done task @cancelled\n");
     }
 
     #[test]
     fn archive_moves_whole_block_with_descendants() {
         let input = "x @done\n    deep @hide\ny\n";
         let out = archive(input, &[0]);
-        assert_eq!(out, "y\nArchive:\n    x @done\n        deep @hide\n");
+        assert_eq!(out, "y\n\nArchive:\n    x @done\n        deep @hide\n");
     }
 
     #[test]
@@ -284,7 +296,7 @@ Archive:
         let out = archive(input, &[2, 3]);
         assert_eq!(
             out,
-            "L:\n    keep\nArchive:\n    one @done\n    two @cancelled\n"
+            "L:\n    keep\n\nArchive:\n    one @done\n    two @cancelled\n"
         );
     }
 
@@ -299,9 +311,12 @@ Archive:
     fn archive_ignores_indented_archive_heading_as_destination() {
         let input = "    Archive:\n        old @done\ndone @done\n";
         let out = archive(input, &[2]);
+        // The archive decision ignored the indented `Archive:` (a new root
+        // heading was created); §フォーマット then normalizes the indented
+        // heading to the top level.
         assert_eq!(
             out,
-            "    Archive:\n        old @done\nArchive:\n    done @done\n"
+            "Archive:\n    old @done\n\nArchive:\n    done @done\n"
         );
     }
 
@@ -324,7 +339,7 @@ Archive:
         let out = unarchive(input, &[3]);
         assert_eq!(
             out,
-            "Inbox:\n    a\nArchive:\n    other @done\nold @done\n    note @hide\n"
+            "Inbox:\n    a\n\nArchive:\n    other @done\n\nold @done\n    note @hide\n"
         );
     }
 
@@ -343,6 +358,44 @@ Archive:
     #[test]
     fn unarchive_requires_gray_block() {
         let input = "Archive:\n    active\n";
+        assert_eq!(unarchive(input, &[1]), input);
+    }
+
+    #[test]
+    fn partial_indent_line_is_its_own_top_level_block() {
+        // 1-3 leading spaces are still インデントレベル 0, so `   b @done` is
+        // a separate top-level block from `a @done` and archives alone.
+        let out = archive("a @done\n   b @done\n", &[1]);
+        assert_eq!(out, "a @done\n\nArchive:\n    b @done\n");
+    }
+
+    #[test]
+    fn leading_indented_line_is_not_a_top_level_block() {
+        // A document starting with an indented line has no top-level block
+        // there, so the selection cannot be archived.
+        let input = "    a @done\nplain\n";
+        assert_eq!(archive(input, &[0]), input);
+    }
+
+    #[test]
+    fn blank_line_separates_top_level_blocks() {
+        let out = archive("a @done\n\nb @done\n", &[2]);
+        assert_eq!(out, "a @done\n\nArchive:\n    b @done\n");
+    }
+
+    #[test]
+    fn archive_formats_the_whole_document() {
+        // §フォーマット applies after Archive: the untouched ` t` line is
+        // normalized too.
+        let out = archive("  x @done\n t\n", &[0]);
+        assert_eq!(out, "t\n\nArchive:\n    x @done\n");
+    }
+
+    #[test]
+    fn unarchive_ignores_deeper_only_content_under_archive() {
+        // Only direct children (level 1) of the root `Archive:` heading are
+        // unarchive targets; a deeper line with no level-1 block does not move.
+        let input = "Archive:\n        deep @done\n";
         assert_eq!(unarchive(input, &[1]), input);
     }
 }

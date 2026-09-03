@@ -1444,6 +1444,15 @@ Archive:
     }
 
     #[test]
+    fn semantic_tokens_unclosed_stylings_and_urls_have_no_tokens() {
+        // 適用規則: 閉じていないインライン装飾やURLは個別表示しない。
+        assert!(semantic_tokens_of("*unclosed\n").is_empty());
+        assert!(semantic_tokens_of("see **not bold\n").is_empty());
+        assert!(semantic_tokens_of("`unclosed\n").is_empty());
+        assert!(semantic_tokens_of("see <https://example.com\n").is_empty());
+    }
+
+    #[test]
     fn semantic_tokens_start_tag_modifiers() {
         let now = fixed_now();
         let abs = abs_positions(&tokens_at("@start(2000-01-01)\n", now));

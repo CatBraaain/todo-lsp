@@ -112,8 +112,9 @@ fn process_definition(lines: &mut Vec<String>, def: &str, now: DateTime<Utc>) {
 
     // 手順 6: skip when the destination already has the same task name with
     // the same @start.
-    let already_there = children(lines, container).any(|idx| {
-        let text = &lines[idx];
+    let nodes = build_nodes(lines);
+    let already_there = children(lines, container).into_iter().any(|child| {
+        let text = &lines[nodes[child].line_idx];
         let p = line::parse_line(text);
         p.task_text(text) == name && p.tag_arg("start").and_then(parse_date) == Some(prev)
     });
@@ -136,6 +137,7 @@ fn process_definition(lines: &mut Vec<String>, def: &str, now: DateTime<Utc>) {
 
 /// The canonical indent for a new child of the container: one level (4
 /// spaces) deeper than the container's own indent; root children get none.
+/// `container` is a node index.
 fn indent_for_container(lines: &[String], container: Option<usize>) -> String {
     match container {
         None => String::new(),
@@ -143,25 +145,30 @@ fn indent_for_container(lines: &[String], container: Option<usize>) -> String {
     }
 }
 
-/// Direct children of a container, as line indices; root children when the
-/// container is `None`.
-fn children(lines: &[String], container: Option<usize>) -> impl Iterator<Item = usize> + '_ {
+/// Direct children of a container, as node indices into
+/// [`build_nodes`] (the same representation `container` uses); root
+/// children when the container is `None`.
+fn children(lines: &[String], container: Option<usize>) -> Vec<usize> {
     build_nodes(lines)
         .into_iter()
-        .filter(move |n| n.parent == container)
-        .map(|n| n.line_idx)
+        .enumerate()
+        .filter(|(_, n)| n.parent == container)
+        .map(|(i, _)| i)
+        .collect()
 }
 
-/// Find a container child whose タスクテキスト contains `name` (手順 4).
+/// Find a container child whose タスクテキスト contains `name` (手順 4),
+/// as a node index.
 fn find_child(lines: &[String], container: Option<usize>, name: &str) -> Option<usize> {
-    children(lines, container).find(|&idx| {
-        let text = &lines[idx];
+    let nodes = build_nodes(lines);
+    children(lines, container).into_iter().find(|&child| {
+        let text = &lines[nodes[child].line_idx];
         line::parse_line(text).task_text(text).contains(name)
     })
 }
 
 /// The last line index of a container's block (its subtree); for the root,
-/// the last structure line of the document.
+/// the last structure line of the document. `container` is a node index.
 fn block_end(lines: &[String], container: Option<usize>) -> usize {
     let nodes = build_nodes(lines);
     match container {
@@ -302,6 +309,36 @@ mod tests {
             out,
             "a @repeat(0 0 * * *)\nb @repeat(0 12 * * *)\na @start(2024-06-15)\nb @start(2024-06-14 12:00)\n"
         );
+    }
+
+    #[test]
+    fn blank_lines_do_not_break_placement_under_existing_parent() {
+        // The parent heading sits at line 2 while it is node 1: placement
+        // must use the node, not the physical line index.
+        let input = "Inbox:\n\nHome:\n    stuff\nHome/mop floor @repeat(0 0 * * *)\n";
+        let out = repeat_tasks(input, now());
+        assert_eq!(
+            out,
+            "Inbox:\n\nHome:\n    stuff\n    mop floor @start(2024-06-15)\n\nHome/mop floor @repeat(0 0 * * *)\n"
+        );
+    }
+
+    #[test]
+    fn blank_lines_do_not_break_nested_parent_resolution() {
+        let input = "Home:\n\n    Kitchen:\n        dishes\nHome/Kitchen/mop floor @repeat(0 0 * * *)\n";
+        let out = repeat_tasks(input, now());
+        assert_eq!(
+            out,
+            "Home:\n\n    Kitchen:\n        dishes\n        mop floor @start(2024-06-15)\nHome/Kitchen/mop floor @repeat(0 0 * * *)\n"
+        );
+    }
+
+    #[test]
+    fn blank_lines_do_not_break_duplicate_suppression() {
+        // The existing generated task must still be found when the parent
+        // block is not at the document head.
+        let input = "intro\n\nInbox:\n    buy milk @start(2024-06-15)\n\nInbox/buy milk @repeat(0 0 * * *)\n";
+        assert_eq!(repeat_tasks(input, now()), input);
     }
 
     #[test]
