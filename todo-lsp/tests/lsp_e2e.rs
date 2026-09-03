@@ -667,6 +667,63 @@ fn execute_command_toggle_done_applies_edit() {
     s.shutdown_and_exit();
 }
 
+/// CRLF regression (P1): on a CRLF document, `toggleDone` on a line that
+/// already has `@done` removes it — the trailing CR used to hide the tag
+/// column so the tag was duplicated — and the edit keeps the document's
+/// EOL (only the changed line's content is replaced, CR stays outside the
+/// range).
+#[test]
+fn execute_command_toggle_done_on_crlf_document_removes_tag() {
+    let mut s = LspSession::spawn();
+    let init_id = s.send_request(
+        "initialize",
+        json!({ "processId": null, "rootUri": null, "capabilities": {} }),
+    );
+    let _ = s.await_response(init_id);
+    s.send_notification("initialized", json!({}));
+
+    let text = "task @done\r\nplain\r\n";
+    s.send_notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": SAMPLE_URI, "languageId": "todo", "version": 1, "text": text,
+            }
+        }),
+    );
+    let _ = s.await_notification("textDocument/publishDiagnostics");
+
+    let id = s.send_request(
+        "workspace/executeCommand",
+        json!({
+            "command": "todo-language.toggleDone",
+            "arguments": [SAMPLE_URI, [0]],
+        }),
+    );
+    let resp = s.await_response(id);
+    assert!(
+        resp.get("result").is_some(),
+        "command must not error: {resp}"
+    );
+
+    let apply = s.last_apply_edit.as_ref().expect("applyEdit was sent");
+    let changes = apply["edit"]["changes"][SAMPLE_URI]
+        .as_array()
+        .expect("changes for the document");
+    assert_eq!(changes.len(), 1, "one line-limited edit: {changes:?}");
+    let edit = &changes[0];
+    // Only line 0's content ("task @done", 10 bytes) is replaced; the CR
+    // stays outside the range so the document keeps CRLF.
+    assert_eq!(edit["range"]["start"]["line"], 0);
+    assert_eq!(edit["range"]["start"]["character"], 0);
+    assert_eq!(edit["range"]["end"]["line"], 0);
+    assert_eq!(edit["range"]["end"]["character"], 10);
+    // The tag is recognized and removed (no duplicated @done, no stray CR).
+    assert_eq!(edit["newText"].as_str().unwrap(), "task");
+
+    s.shutdown_and_exit();
+}
+
 /// §アーカイブ: `todo-language.archive` moves an all-gray top-level block
 /// under a newly created root-level `Archive:` heading.
 #[test]

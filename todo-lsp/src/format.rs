@@ -88,10 +88,15 @@ pub fn format_document(text: &str) -> String {
     result
 }
 
-/// Split into physical lines, dropping the empty tail element produced by a
-/// trailing newline (it is re-added when joining).
+/// Split into physical lines, dropping the empty tail element produced
+/// by a trailing newline (it is re-added when joining) and each line's
+/// trailing CR — CRLF documents are processed as LF lines. The document
+/// EOL is restored when edits are emitted (`edits::match_eol`).
 pub(crate) fn split_lines(text: &str) -> Vec<&str> {
-    let mut lines: Vec<&str> = text.split('\n').collect();
+    let mut lines: Vec<&str> = text
+        .split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .collect();
     if lines.last() == Some(&"") {
         lines.pop();
     }
@@ -159,6 +164,15 @@ mod tests {
     fn rule3_all_blank_document_stays_empty() {
         assert_eq!(fmt(""), "");
         assert_eq!(fmt("\n\n"), "");
+    }
+
+    #[test]
+    fn crlf_input_is_processed_as_lf_lines() {
+        assert_eq!(split_lines("a\r\nb\r\n"), ["a", "b"]);
+        assert_eq!(split_lines("a\r\n"), ["a"]);
+        // Formatting a CRLF document yields the LF form; the document EOL is
+        // restored by the edit layer (edits::match_eol).
+        assert_eq!(fmt("A:\r\n  a\r\n"), "A:\n    a\n");
     }
 
     #[test]

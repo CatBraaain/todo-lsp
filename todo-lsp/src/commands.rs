@@ -307,6 +307,17 @@ mod tests {
     }
 
     #[test]
+    fn toggle_on_crlf_document_behaves_like_lf() {
+        // Regression: the trailing CR used to hide the tag column, so
+        // toggling @done on `task @done\r` duplicated the tag instead of
+        // removing it. CRLF lines toggle exactly like LF ones.
+        let out = toggle("task @done\r\nplain\r\n", &[0], Toggle::Done, today());
+        assert_eq!(out, "task\nplain\n");
+        let out = toggle("plain\r\n", &[0], Toggle::Done, today());
+        assert_eq!(out, "plain @done(2024-06-15)\n");
+    }
+
+    #[test]
     fn toggle_skips_blank_lines() {
         let out = toggle("a\n\nb\n", &[0, 1, 2], Toggle::Done, today());
         assert_eq!(out, "a @done(2024-06-15)\n\nb @done(2024-06-15)\n");

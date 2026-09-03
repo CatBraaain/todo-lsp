@@ -10,7 +10,7 @@ use tower_lsp_server::{jsonrpc::Result, Client, LanguageServer};
 use crate::analysis;
 use crate::archive;
 use crate::commands::{reindent, toggle, Toggle};
-use crate::edits::{line_edits, token_delta_edits};
+use crate::edits::{line_edits, match_eol, token_delta_edits};
 use crate::format::format_document;
 use crate::parse::{parse, Document, DocumentStore};
 use crate::repeat::repeat_tasks;
@@ -277,7 +277,10 @@ impl LanguageServer for Backend {
             .unwrap()
             .get(&uri)
             .and_then(|document| {
-                let formatted = format_document(&document.text);
+                // format_document yields LF lines; emit them in the
+                // document's own EOL (CRLF documents keep CRLF).
+                let formatted =
+                    match_eol(&document.text, format_document(&document.text));
                 if formatted == document.text {
                     None
                 } else {

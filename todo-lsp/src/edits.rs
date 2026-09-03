@@ -15,10 +15,24 @@ fn lines_with_newline(text: &str) -> Vec<&str> {
     text.split_inclusive('\n').collect()
 }
 
-/// A line slice without its trailing newline (the newline is not part of the
-/// replaced content; the surrounding lines keep their own).
+/// A line slice without its line ending (`\r\n` or `\n`) — the EOL is not
+/// part of the replaced content; the surrounding lines keep their own.
 fn line_content(line: &str) -> &str {
-    line.strip_suffix('\n').unwrap_or(line)
+    line.strip_suffix("\r\n")
+        .or_else(|| line.strip_suffix('\n'))
+        .unwrap_or(line)
+}
+
+/// Re-line-end `text` (built from LF lines) to `model`'s EOL style: when
+/// `model` contains any CRLF, every LF in `text` becomes CRLF. Mixed-EOL
+/// documents are unified to CRLF; CR-only line endings are unsupported
+/// (VSCode documents use LF or CRLF). `text` must not already contain CR.
+pub(crate) fn match_eol(model: &str, text: String) -> String {
+    if model.contains("\r\n") {
+        text.replace('\n', "\r\n")
+    } else {
+        text
+    }
 }
 
 /// §コマンド: line-limited edits transforming `old` into `new`.
@@ -27,8 +41,11 @@ fn line_content(line: &str) -> &str {
 /// range never covers an unchanged line. Returns `[]` when the texts are
 /// equal. Positions use UTF-8 byte columns (the server's offsetEncoding).
 pub fn line_edits(old: &str, new: &str) -> Vec<TextEdit> {
+    // `new` is built from LF lines; emit it in the document's own EOL so
+    // unchanged lines stay byte-identical (CRLF documents keep CRLF).
+    let new = match_eol(old, new.to_string());
     let old_lines = lines_with_newline(old);
-    let new_lines = lines_with_newline(new);
+    let new_lines = lines_with_newline(&new);
     let n = old_lines.len();
     let m = new_lines.len();
 
@@ -235,7 +252,8 @@ mod tests {
 
     fn assert_roundtrip(old: &str, new: &str) -> Vec<TextEdit> {
         let edits = line_edits(old, new);
-        assert_eq!(apply(old, &edits), new, "old={old:?} new={new:?}");
+        let expected = match_eol(old, new.to_string());
+        assert_eq!(apply(old, &edits), expected, "old={old:?} new={new:?}");
         edits
     }
 
@@ -345,6 +363,32 @@ mod tests {
     fn multibyte_content_uses_byte_columns() {
         let edits = assert_roundtrip("タスク\nb\n", "タスク @done\nb\n");
         assert_eq!(edits[0].range.end, Position::new(0, 9)); // 3 chars × 3 bytes
+    }
+
+    #[test]
+    fn crlf_document_limits_edits_to_changed_lines() {
+        // One changed line: the untouched CRLF line stays byte-identical,
+        // the edit covers only line 0's content (CR is left outside the
+        // range, so the document keeps its EOL).
+        let edits = assert_roundtrip("task @done\r\nplain\r\n", "task\nplain\n");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].range.start, Position::new(0, 0));
+        assert_eq!(edits[0].range.end, Position::new(0, 10)); // "task @done"
+        assert_eq!(edits[0].new_text, "task");
+    }
+
+    #[test]
+    fn crlf_multiline_new_text_uses_crlf() {
+        // A replacement that grows the line count must join the new lines
+        // with CRLF (archive shape), or the document would get mixed EOLs.
+        let edits = assert_roundtrip(
+            "keep\r\nold @done\r\n",
+            "keep\nArchive:\n    old @done\n",
+        );
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].range.start, Position::new(1, 0));
+        assert_eq!(edits[0].range.end, Position::new(1, 9)); // "old @done"
+        assert_eq!(edits[0].new_text, "Archive:\r\n    old @done");
     }
 
     // ----- token_delta_edits -----
