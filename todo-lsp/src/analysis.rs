@@ -110,35 +110,73 @@ fn make_symbol(
     }
 }
 
-/// Build folding ranges: one `FoldingRange` (kind `REGION`) per `heading_block`
-/// that owns a `task_block`, spanning from the `heading_line` start to the
-/// `task_block` end (the `dedent` token is zero-width and would overshoot by a
-/// line, so it is intentionally not used).
-pub fn folding_ranges(root: Node, _source: &[u8]) -> Vec<FoldingRange> {
+/// Build heading and gray-block folding ranges. A heading with a leading gray
+/// child run becomes a comment range; a `source_file` or `task_block`
+/// contributes one comment range for its leading run of gray child blocks.
+pub fn folding_ranges(root: Node, source: &[u8]) -> Vec<FoldingRange> {
+    let tones = line_tones(source);
     let mut out = Vec::new();
-    collect_folding_ranges(root, &mut out);
+    collect_folding_ranges(root, &tones, &mut out);
+    out.sort_by_key(|range| (range.start_line, range.end_line));
+    out.dedup_by(|left, right| {
+        left.start_line == right.start_line && left.end_line == right.end_line
+    });
     out
 }
 
-fn collect_folding_ranges(node: Node, out: &mut Vec<FoldingRange>) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LineTone {
+    Blank,
+    Gray,
+    Plain,
+}
+
+fn line_tones(source: &[u8]) -> Vec<LineTone> {
+    source
+        .split(|&byte| byte == b'\n')
+        .map(|line| {
+            let line = if line.last() == Some(&b'\r') {
+                &line[..line.len() - 1]
+            } else {
+                line
+            };
+            let Ok(text) = std::str::from_utf8(line) else {
+                return LineTone::Plain;
+            };
+            let parts = crate::line::parse_line(text);
+            if parts.is_blank() {
+                LineTone::Blank
+            } else if parts.gray().is_some() {
+                LineTone::Gray
+            } else {
+                LineTone::Plain
+            }
+        })
+        .collect()
+}
+
+fn collect_folding_ranges(node: Node, tones: &[LineTone], out: &mut Vec<FoldingRange>) {
+    if matches!(node.kind(), "source_file" | "task_block") {
+        if let Some(range) = leading_gray_children_range(&node, tones) {
+            out.push(range);
+        }
+    }
+
     for child in named_children_of(&node) {
         match child.kind() {
             "heading_block" => {
-                if let Some(r) = folding_range_for_heading(&child) {
-                    out.push(r);
+                if let Some(range) = folding_range_for_heading(&child, tones) {
+                    out.push(range);
                 }
-                collect_folding_ranges(child, out);
+                collect_folding_ranges(child, tones, out);
             }
-            "task_block" => {
-                // Nested heading_blocks live inside a task_block.
-                collect_folding_ranges(child, out);
-            }
+            "task_block" => collect_folding_ranges(child, tones, out),
             _ => {}
         }
     }
 }
 
-fn folding_range_for_heading(node: &Node) -> Option<FoldingRange> {
+fn folding_range_for_heading(node: &Node, tones: &[LineTone]) -> Option<FoldingRange> {
     let mut heading_line = None;
     let mut task_block = None;
     for child in named_children_of(node) {
@@ -151,10 +189,17 @@ fn folding_range_for_heading(node: &Node) -> Option<FoldingRange> {
     let heading_line = heading_line?;
     let task_block = task_block?;
     let start_line = heading_line.start_position().row as u32;
-    // task_block.end sits at the start of the line *after* its last child (each
-    // task_line/heading_line consumes its trailing newline), so subtract one to
-    // fold through the last content line.
-    let end_line = (task_block.end_position().row as u32).saturating_sub(1);
+
+    if let Some((_, end_line)) = leading_gray_children_bounds(&task_block, tones) {
+        return Some(FoldingRange {
+            start_line,
+            end_line,
+            kind: Some(FoldingRangeKind::Comment),
+            ..Default::default()
+        });
+    }
+
+    let end_line = last_line_of_block(node)? as u32;
     if end_line <= start_line {
         return None;
     }
@@ -164,6 +209,69 @@ fn folding_range_for_heading(node: &Node) -> Option<FoldingRange> {
         kind: Some(FoldingRangeKind::Region),
         ..Default::default()
     })
+}
+
+fn leading_gray_children_range(node: &Node, tones: &[LineTone]) -> Option<FoldingRange> {
+    let (start_line, end_line) = leading_gray_children_bounds(node, tones)?;
+    if end_line <= start_line {
+        return None;
+    }
+    Some(FoldingRange {
+        start_line,
+        end_line,
+        kind: Some(FoldingRangeKind::Comment),
+        ..Default::default()
+    })
+}
+
+fn leading_gray_children_bounds(node: &Node, tones: &[LineTone]) -> Option<(u32, u32)> {
+    let children = named_children_of(node);
+    let first = children.first()?;
+    if !is_gray_block(first, tones) {
+        return None;
+    }
+
+    let mut last = first;
+    for child in children.iter().skip(1) {
+        if !is_gray_block(child, tones) {
+            break;
+        }
+        last = child;
+    }
+
+    Some((
+        first.start_position().row as u32,
+        last_line_of_block(last)? as u32,
+    ))
+}
+
+fn is_gray_block(node: &Node, tones: &[LineTone]) -> bool {
+    let start_line = node.start_position().row;
+    let Some(end_line) = last_line_of_block(node) else {
+        return false;
+    };
+    (start_line..=end_line).all(|line| {
+        matches!(
+            tones.get(line),
+            Some(LineTone::Blank | LineTone::Gray)
+        )
+    })
+}
+
+/// Return the last physical line of a `task_line` or `heading_block`. Lines
+/// consume their trailing newline and any following blank lines. A heading's
+/// zero-width `dedent` can point past its child block, so use `task_block.end`.
+fn last_line_of_block(node: &Node) -> Option<usize> {
+    let end_row = match node.kind() {
+        "task_line" => node.end_position().row,
+        "heading_block" => named_children_of(node)
+            .into_iter()
+            .find(|child| child.kind() == "task_block")
+            .map(|task_block| task_block.end_position().row)
+            .unwrap_or_else(|| node.end_position().row),
+        _ => return None,
+    };
+    Some(end_row.saturating_sub(1))
 }
 
 /// Build diagnostics by walking the tree (severity ERROR, source "todo").
@@ -992,17 +1100,85 @@ Archive:
         assert_eq!(child_names(&s[0]), ["item one"]);
     }
 
-    // ----- folding_ranges (exact 0-based rows, all kind == Region) -----
+    // ----- folding_ranges (exact 0-based rows) -----
 
     #[test]
-    fn fold_simple_heading_with_block() {
+    fn fold_heading_with_only_gray_child_as_comment() {
         let r = folds_of(
             "Archive:\n  Alt + A to move selected grayed blocks to archive @done(2024-01-01) @folding\n",
         );
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].start_line, 0);
         assert_eq!(r[0].end_line, 1);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
+    }
+
+    #[test]
+    fn fold_leading_gray_children_replaces_heading_region_with_comment() {
+        let r = folds_of("Project:\n  a @done\n  b @cancelled\n  c\n");
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 2);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
+        assert_eq!(r[1].start_line, 1);
+        assert_eq!(r[1].end_line, 2);
+        assert_eq!(r[1].kind, Some(FoldingRangeKind::Comment));
+    }
+
+    #[test]
+    fn fold_ignores_gray_children_after_a_plain_first_child() {
+        let r = folds_of("Project:\n  a\n  b @done\n  c @hide\n");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 3);
         assert_eq!(r[0].kind, Some(FoldingRangeKind::Region));
+    }
+
+    #[test]
+    fn fold_leading_gray_children_across_blank_lines() {
+        let r = folds_of("a @done\n\nb @hide\nc\n");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 2);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
+    }
+
+    #[test]
+    fn fold_all_gray_heading_and_children_as_nested_comments() {
+        let r = folds_of("Archive:\n  old @done\n  old2 @hide\n");
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 2);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
+        assert_eq!(r[1].start_line, 1);
+        assert_eq!(r[1].end_line, 2);
+        assert_eq!(r[1].kind, Some(FoldingRangeKind::Comment));
+    }
+
+    #[test]
+    fn fold_nested_comment_ranges_do_not_partially_overlap() {
+        let r = folds_of("Outer:\n  a\n  Inner:\n    x @done\n    y @done\n  z\n");
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 5);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Region));
+        assert_eq!(r[1].start_line, 2);
+        assert_eq!(r[1].end_line, 4);
+        assert_eq!(r[1].kind, Some(FoldingRangeKind::Comment));
+        assert_eq!(r[2].start_line, 3);
+        assert_eq!(r[2].end_line, 4);
+        assert_eq!(r[2].kind, Some(FoldingRangeKind::Comment));
+    }
+
+    #[test]
+    fn fold_omits_single_line_gray_runs_and_duplicate_ranges() {
+        assert!(folds_of("a @done\nb\n").is_empty());
+
+        let r = folds_of("P: @done\n  a @done\nz\n");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 1);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
     }
 
     #[test]

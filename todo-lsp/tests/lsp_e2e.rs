@@ -264,6 +264,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 const SAMPLE_URI: &str = "file:///tmp/sample.todo";
+const COMMENT_FOLD_URI: &str = "file:///tmp/comment-fold.todo";
 
 /// Identical to `analysis::tests::SAMPLE` and `vscode-todo/test/fixtures/sample.todo`.
 const SAMPLE_TEXT: &str = "\
@@ -276,6 +277,16 @@ Inbox:
   wrap up
 Archive:
   old task
+";
+
+const COMMENT_FOLD_TEXT: &str = "\
+Project:
+  a @done
+  b @done
+  c
+Archive:
+  old @done
+  old2 @done
 ";
 
 /// Drives the full handshake against a clean document and asserts every
@@ -450,6 +461,58 @@ fn full_handshake_with_clean_sample() {
     );
 
     // 9. graceful shutdown.
+    s.shutdown_and_exit();
+}
+
+#[test]
+fn folding_range_returns_gray_ranges_as_comments() {
+    let mut s = LspSession::spawn();
+    let init_id = s.send_request(
+        "initialize",
+        json!({ "processId": null, "rootUri": null, "capabilities": {} }),
+    );
+    let _ = s.await_response(init_id);
+    s.send_notification("initialized", json!({}));
+
+    s.send_notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": COMMENT_FOLD_URI,
+                "languageId": "todo",
+                "version": 1,
+                "text": COMMENT_FOLD_TEXT,
+            }
+        }),
+    );
+    let diag_msg = s.await_notification("textDocument/publishDiagnostics");
+    assert!(
+        diag_msg["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics array")
+            .is_empty(),
+        "comment-fold fixture must be clean: {diag_msg}"
+    );
+
+    let id = s.send_request(
+        "textDocument/foldingRange",
+        json!({ "textDocument": { "uri": COMMENT_FOLD_URI } }),
+    );
+    let resp = s.await_response(id);
+    let folds = resp["result"].as_array().expect("folds array");
+    assert_eq!(folds.len(), 4, "Project and Archive with their comments");
+    let expected = [
+        (0, 2, "comment"),
+        (1, 2, "comment"),
+        (4, 6, "comment"),
+        (5, 6, "comment"),
+    ];
+    for (fold, (start_line, end_line, kind)) in folds.iter().zip(expected) {
+        assert_eq!(fold["startLine"].as_i64(), Some(start_line));
+        assert_eq!(fold["endLine"].as_i64(), Some(end_line));
+        assert_eq!(fold["kind"].as_str(), Some(kind));
+    }
+
     s.shutdown_and_exit();
 }
 

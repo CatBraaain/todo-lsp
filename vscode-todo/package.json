@@ -177,6 +177,11 @@
         "key": "alt+shift+a",
         "command": "todo-language.unarchive",
         "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
+      },
+      {
+        "key": "alt+f",
+        "command": "editor.foldAllBlockComments",
+        "when": "editorTextFocus && editorLangId == todo && !editorReadonly"
       }
     ],
     "semanticTokenTypes": [

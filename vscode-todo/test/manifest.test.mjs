@@ -81,9 +81,12 @@ test("コマンド: all 15 commands contributed with palette titles", () => {
 
 test("コマンド: default keys bound only while editing a writable todo file", () => {
   const bindings = pkg.contributes.keybindings;
-  assert.equal(bindings.length, SPEC_COMMANDS.filter((c) => c[2]).length);
+  const todoBindings = bindings.filter((b) =>
+    b.command.startsWith("todo-language."),
+  );
+  assert.equal(todoBindings.length, SPEC_COMMANDS.filter((c) => c[2]).length);
   for (const [id, , key] of SPEC_COMMANDS) {
-    const binding = bindings.find((b) => b.command === id);
+    const binding = todoBindings.find((b) => b.command === id);
     if (key === null) {
       assert.equal(binding, undefined, `${id} has no default key`);
       continue;
@@ -95,6 +98,18 @@ test("コマンド: default keys bound only while editing a writable todo file",
       "editorTextFocus && editorLangId == todo && !editorReadonly",
     );
   }
+});
+
+test("コマンド: Alt+F folds all comment ranges while editing a writable todo file", () => {
+  const binding = pkg.contributes.keybindings.find(
+    (b) => b.command === "editor.foldAllBlockComments",
+  );
+  assert.ok(binding, "editor.foldAllBlockComments keybinding missing");
+  assert.equal(binding.key, "alt+f");
+  assert.equal(
+    binding.when,
+    "editorTextFocus && editorLangId == todo && !editorReadonly",
+  );
 });
 
 test("コマンド: the extension registers every contributed command", () => {
