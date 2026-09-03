@@ -7,60 +7,22 @@ import {
   type ServerOptions,
   TransportKind,
 } from "vscode-languageclient/node";
-import {
-  EDITOR_SWITCH_DELAY_MS,
-  msToNextMinute,
-  shouldAutoRepeat,
-} from "./autoRepeatCore.mjs";
+import { setupAutoRepeatTriggers, shouldAutoRepeat } from "./autoRepeatCore.mjs";
+import { COMMAND_SPECS } from "./commandSpecs.mjs";
+import { platformDirectoryName, serverBinaryName } from "./platform.mjs";
 
 // Resolve the per-platform server binary under bin/<platform>-<arch>/todo-lsp[.exe].
 // The layout matches VS Code's process.platform / process.arch naming and must
 // stay in sync with the bin_dir / bin_ext logic in the root justfile.
 function serverCommand(context: vscode.ExtensionContext): string {
-  const ext = process.platform === "win32" ? ".exe" : "";
   return context.asAbsolutePath(
-    path.join("bin", platformDirectoryName(), `todo-lsp${ext}`),
+    path.join(
+      "bin",
+      platformDirectoryName(process.platform, process.arch),
+      serverBinaryName(process.platform),
+    ),
   );
 }
-
-function platformDirectoryName(): string {
-  switch (`${process.platform}/${process.arch}`) {
-    case "win32/x64":
-      return "win32-x64";
-    case "linux/x64":
-      return "linux-x64";
-    default:
-      throw new Error(
-        `todo-lsp: unsupported platform ${process.platform}/${process.arch}. Ship a matching binary under bin/.`,
-      );
-  }
-}
-
-// The todo-language.* commands contributed by the server. Every command takes
-// the document URI; all but Repeat Tasks also take the selected line numbers
-// (the union of the editor's selections).
-interface CommandSpec {
-  id: string;
-  needsSelection: boolean;
-}
-
-const COMMAND_SPECS: CommandSpec[] = [
-  { id: "todo-language.toggleDone", needsSelection: true },
-  { id: "todo-language.toggleCancelled", needsSelection: true },
-  { id: "todo-language.toggleStart", needsSelection: true },
-  { id: "todo-language.toggleDue", needsSelection: true },
-  { id: "todo-language.toggleQueue", needsSelection: true },
-  { id: "todo-language.toggleQueueUnshift", needsSelection: true },
-  { id: "todo-language.toggleWaiting", needsSelection: true },
-  { id: "todo-language.togglePending", needsSelection: true },
-  { id: "todo-language.toggleHide", needsSelection: true },
-  { id: "todo-language.toggleRepeat", needsSelection: true },
-  { id: "todo-language.indent", needsSelection: true },
-  { id: "todo-language.dedent", needsSelection: true },
-  { id: "todo-language.repeatTasks", needsSelection: false },
-  { id: "todo-language.archive", needsSelection: true },
-  { id: "todo-language.unarchive", needsSelection: true },
-];
 
 // 選択行: every line contained in any selection, sorted and deduplicated.
 function selectionLines(editor: vscode.TextEditor): number[] {
@@ -75,68 +37,43 @@ function selectionLines(editor: vscode.TextEditor): number[] {
 
 // 自動リピート (§リピート): with `todo-language.repeatTask.autoRepeat` enabled
 // and a todo document active, Repeat Tasks runs at extension startup, ~0.5s
-// after the active editor switches, and every minute at second 0.
+// after the active editor switches, and every minute at second 0. The
+// trigger wiring lives in autoRepeatCore.mjs; this adapter just binds the
+// vscode environment onto it.
 function setupAutoRepeat(
   context: vscode.ExtensionContext,
   client: LanguageClient,
   started: Promise<void>,
 ): void {
-  let running = false;
-
-  const trigger = (): void => {
-    if (running) {
-      return;
-    }
+  const fire = (): unknown => {
     const editor = vscode.window.activeTextEditor;
     const enabled = vscode.workspace
       .getConfiguration("todo-language")
       .get<boolean>("repeatTask.autoRepeat", true);
     if (!editor || !shouldAutoRepeat(enabled, editor.document.languageId)) {
-      return;
+      return undefined;
     }
-    running = true;
-    void client
-      .sendRequest(ExecuteCommandRequest.type, {
-        command: "todo-language.repeatTasks",
-        arguments: [editor.document.uri.toString()],
-      })
-      .catch(() => {
-        // A failed repeat run (e.g. server restarting) retries on the next
-        // trigger; nothing to surface to the user.
-      })
-      .finally(() => {
-        running = false;
-      });
+    return client.sendRequest(ExecuteCommandRequest.type, {
+      command: "todo-language.repeatTasks",
+      arguments: [editor.document.uri.toString()],
+    });
   };
 
-  // 拡張の起動時.
-  void started.then(trigger);
-
-  // アクティブエディタの切替から約 0.5 秒後.
-  let switchTimer: NodeJS.Timeout | undefined;
-  context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(() => {
-      clearTimeout(switchTimer);
-      switchTimer = setTimeout(trigger, EDITOR_SWITCH_DELAY_MS);
-    }),
-  );
-
-  // 毎分 0 秒.
-  let minuteTimer: NodeJS.Timeout | undefined;
-  const scheduleMinute = (): void => {
-    minuteTimer = setTimeout(() => {
-      trigger();
-      scheduleMinute();
-    }, msToNextMinute(new Date()));
-  };
-  scheduleMinute();
-
-  context.subscriptions.push({
-    dispose: () => {
-      clearTimeout(switchTimer);
-      clearTimeout(minuteTimer);
+  const triggers = setupAutoRepeatTriggers({
+    onStartup: (cb: () => void) => {
+      void started.then(cb);
     },
+    onEditorSwitch: (cb: () => void) => {
+      context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(cb),
+      );
+    },
+    now: () => new Date(),
+    setTimeout: (cb: () => void, ms: number) => setTimeout(cb, ms),
+    clearTimeout: (timer: NodeJS.Timeout) => clearTimeout(timer),
+    fire,
   });
+  context.subscriptions.push({ dispose: () => triggers.dispose() });
 }
 
 export function activate(context: vscode.ExtensionContext): void {

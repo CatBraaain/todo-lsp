@@ -6,13 +6,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { COMMAND_SPECS } from "../src/commandSpecs.mjs";
+import {
+  platformDirectoryName,
+  serverBinaryName,
+} from "../src/platform.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(root, "..", "package.json"), "utf8"));
 const langConfig = JSON.parse(
   readFileSync(join(root, "..", "language-configuration.json"), "utf8"),
 );
-const extensionTs = readFileSync(join(root, "..", "src", "extension.ts"), "utf8");
 
 test("ファイル関連付け: .todo and .tasks open as language `todo`", () => {
   const language = pkg.contributes.languages.find((l) => l.id === "todo");
@@ -93,16 +97,18 @@ test("コマンド: default keys bound only while editing a writable todo file",
   }
 });
 
-test("コマンド: the extension forwards every command to the server", () => {
-  for (const [id] of SPEC_COMMANDS) {
-    assert.ok(
-      extensionTs.includes(`"${id}"`),
-      `extension.ts does not reference ${id}`,
+test("コマンド: the extension registers every contributed command", () => {
+  const contributed = pkg.contributes.commands.map((c) => c.command).sort();
+  const registered = COMMAND_SPECS.map((s) => s.id).sort();
+  assert.deepEqual(registered, contributed);
+  // Repeat Tasks is document-wide; every other command passes the selection.
+  for (const spec of COMMAND_SPECS) {
+    assert.equal(
+      spec.needsSelection,
+      spec.id !== "todo-language.repeatTasks",
+      `needsSelection wrong for ${spec.id}`,
     );
   }
-  // Repeat Tasks is document-wide; every other command passes the selection.
-  const repeatLine = /^.*todo-language\.repeatTasks.*$/m;
-  assert.match(extensionTs, repeatLine);
 });
 
 test("設定: todo-language.repeatTask.autoRepeat contributed, default true", () => {
@@ -116,8 +122,18 @@ test("設定: todo-language.repeatTask.autoRepeat contributed, default true", ()
   assert.equal(property.default, true);
 });
 
+test("利用環境: supported platforms resolve their binary directory and name", () => {
+  assert.equal(platformDirectoryName("win32", "x64"), "win32-x64");
+  assert.equal(platformDirectoryName("linux", "x64"), "linux-x64");
+  assert.equal(serverBinaryName("win32"), "todo-lsp.exe");
+  assert.equal(serverBinaryName("linux"), "todo-lsp");
+});
+
 test("利用環境: unsupported platforms fail with the spec error message", () => {
-  assert.match(extensionTs, /todo-lsp: unsupported platform \$\{process\.platform\}\/\$\{process\.arch\}\. Ship a matching binary under bin\/\./);
+  assert.throws(
+    () => platformDirectoryName("darwin", "arm64"),
+    /^Error: todo-lsp: unsupported platform darwin\/arm64\. Ship a matching binary under bin\/\.$/,
+  );
 });
 
 // §表示: the semantic-token color rules mirror SPEC.md's color tables.
