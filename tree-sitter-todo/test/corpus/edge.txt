@@ -128,28 +128,26 @@ Unclosed tag argument is body text
     (text)))
 
 ===
-Header without text is an error
+Header without text is a task line
 ===
 
 :
 ---
 
 (source_file
-  (ERROR
-    (colon)))
+  (task_line
+    (text)))
 
 ===
-Header with only a tag is an error
+Header with only a tag is a task line
 ===
 
 : @done
 ---
 
 (source_file
-  (ERROR
-    (colon)
-    (indent))
-  (tag_only_line
+  (task_line
+    (text)
     (tag
       (name))))
 
@@ -214,3 +212,52 @@ task @time(12:30)
     (tag
       (name)
       (arg))))
+
+===
+Colon-initial body is a task line
+===
+
+:
+: @done
+---
+
+(source_file
+  (task_line (text))
+  (task_line (text) (tag (name)))
+)
+
+===
+Colon-initial heading body
+===
+
+:foo:
+  task
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text)))
+    (dedent)
+  )
+)
+
+===
+Heading leading tag tokens are body text
+===
+
+@done Project:
+  task
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text)))
+    (dedent)
+  )
+)

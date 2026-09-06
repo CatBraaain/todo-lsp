@@ -134,7 +134,8 @@ static bool scan_trailing_colon(TSLexer *lexer)
 // TEXT は行頭タグ列（SPEC 行頭タグ列。@name(arg?) の空白区切り連続）を先頭に含み、
 // そこから本文の続きまでを 1 トークンとして返す。行頭タグ列だけで行が終わる
 // （タグだけの行）ときは TEXT を返さず false（内部 lexer の TAG として処理される）。
-// 本文が空のまま `:` や閉じないタグに当たる場合も false。
+// 本文の1文字目の `:` も本文として扱い（SPEC タスク: `:` で始まる行はタスク行）、
+// 2つ目以降の `:` が trailing colon 要件を満たせば見出しになる。
 static bool scan_text(TSLexer *lexer)
 {
   bool text_end_set = false;
@@ -208,7 +209,14 @@ static bool scan_text(TSLexer *lexer)
     {
       if (!text_end_set)
       {
-        return false;
+        // 本文の1文字目のコロン（SPEC タスク: `:` で始まる行はタスク行）。
+        // 本文として消費し、走査を続ける。2つ目以降のコロンが trailing
+        // colon 要件を満たせば、そこで見出しになる。
+        lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        text_end_set = true;
+        prev_was_space = false;
+        continue;
       }
       if (scan_trailing_colon(lexer))
       {
@@ -249,52 +257,89 @@ bool tree_sitter_todo_external_scanner_scan(void *payload, TSLexer *lexer, const
 
   // 改行文字は NEWLINE。\n を含む非ゼロ幅にして repeat($._newline) の
   // 無限ループを防ぐ。後続の行頭空白は次の scan で INDENT/DEDENT として処理。
-  if (!error_recovery_mode && valid_symbols[NEWLINE] && lexer->lookahead == '\n')
+  // 行の途中（列 1 以上）から呼ばれた scan では、残りの空白列を行末空白として
+  // skip で読み飛ばしてから \n に達したら NEWLINE を返す。行末空白を内部 lexer の
+  // extras に任せると有効トークンのマッチ失敗から error recovery に入るため、
+  // 外部 scanner が自力で行末まで消費する。空白の後に他の文字（タグ列の @ など）
+  // や EOF が続く場合はここで NEWLINE を返らず、後段の INDENT/DEDENT 判定
+  // （EOF での DEDENT）に譲る。行頭（列 0）は従来どおり \n 群を NEWLINE にする。
+  if (!error_recovery_mode && valid_symbols[NEWLINE])
   {
-    while (lexer->lookahead == '\n')
+    if (lexer->get_column(lexer) > 0)
     {
-      advance(lexer);
+      while (lexer->lookahead == ' ' || lexer->lookahead == '\t')
+      {
+        skip(lexer);
+      }
+      if (lexer->lookahead == '\n')
+      {
+        while (lexer->lookahead == '\n')
+        {
+          advance(lexer);
+        }
+        lexer->mark_end(lexer);
+        lexer->result_symbol = NEWLINE;
+        return true;
+      }
     }
-    lexer->mark_end(lexer);
-    lexer->result_symbol = NEWLINE;
-    return true;
+    else if (lexer->lookahead == '\n')
+    {
+      while (lexer->lookahead == '\n')
+      {
+        advance(lexer);
+      }
+      lexer->mark_end(lexer);
+      lexer->result_symbol = NEWLINE;
+      return true;
+    }
   }
 
-  // 行頭空白で INDENT / DEDENT。scan 開始位置を mark_end で固定してゼロ幅にし、
-  // 次の scan が同じ行頭から indent_length を再計算できるようにする。
+  // 行頭空白で INDENT / DEDENT。scan 開始位置が行頭（列 0）のときだけ空白を
+  // 数える。TEXT の直後など行の途中から呼ばれた scan では INDENT を誤発火
+  // させない。EOF 位置（列 1 以上でも）は空白がないため indent_length = 0 で
+  // 判定に入り、文書末尾の DEDENT を出せる（末尾改行がない文書向け）。
+  // scan 開始位置を mark_end で固定してゼロ幅にし、次の scan が同じ行頭から
+  // indent_length を再計算できるようにする。
   // インデント単位は SPEC.md のインデントレベル定義に合わせる:
   // 1レベル = スペース4個。タブは直前のスペース3個までと合わせて
   // 1レベル（次の4の倍数へ進む）として数える。
+  bool at_line_start = lexer->get_column(lexer) == 0;
   lexer->mark_end(lexer);
   uint16_t indent_length = 0;
-  while (lexer->lookahead == ' ' || lexer->lookahead == '\t')
+  if (at_line_start)
   {
-    if (lexer->lookahead == '\t')
+    while (lexer->lookahead == ' ' || lexer->lookahead == '\t')
     {
-      indent_length = (uint16_t)(((indent_length / 4) + 1) * 4);
+      if (lexer->lookahead == '\t')
+      {
+        indent_length = (uint16_t)(((indent_length / 4) + 1) * 4);
+      }
+      else
+      {
+        indent_length += 1;
+      }
+      skip(lexer);
     }
-    else
-    {
-      indent_length += 1;
-    }
-    skip(lexer);
   }
-  if (scanner->indents.size > 0)
+  if (at_line_start || lexer->eof(lexer))
   {
-    uint16_t current_indent_length = *array_back(&scanner->indents);
-
-    if (valid_symbols[INDENT] && indent_length > current_indent_length)
+    if (scanner->indents.size > 0)
     {
-      array_push(&scanner->indents, indent_length);
-      lexer->result_symbol = INDENT;
-      return true;
-    }
+      uint16_t current_indent_length = *array_back(&scanner->indents);
 
-    if (valid_symbols[DEDENT] && indent_length < current_indent_length)
-    {
-      (void)array_pop(&scanner->indents);
-      lexer->result_symbol = DEDENT;
-      return true;
+      if (valid_symbols[INDENT] && indent_length > current_indent_length)
+      {
+        array_push(&scanner->indents, indent_length);
+        lexer->result_symbol = INDENT;
+        return true;
+      }
+
+      if (valid_symbols[DEDENT] && indent_length < current_indent_length)
+      {
+        (void)array_pop(&scanner->indents);
+        lexer->result_symbol = DEDENT;
+        return true;
+      }
     }
   }
 
