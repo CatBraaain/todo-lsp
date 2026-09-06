@@ -983,15 +983,11 @@ Archive:
     }
 
     #[test]
-    fn broken_input_has_diagnostics() {
-        // `:` — a heading without a body. The line cannot be a heading_line
-        // (text is required) and cannot be recovered, so tree-sitter yields
-        // an ERROR node.
+    fn colon_only_line_has_no_diagnostics() {
+        // SPEC タスク: `:` で始まる行はタスク行（本文 `:`）。旧仕様の
+        // textless-heading ERROR は発生しない。
         let (_, _, diags) = analyze(":");
-        assert!(!diags.is_empty(), "expected at least one diagnostic");
-        assert!(diags
-            .iter()
-            .all(|d| d.severity == Some(DiagnosticSeverity::ERROR)));
+        assert!(diags.is_empty(), "expected no diagnostics, got {diags:?}");
     }
 
     #[test]
@@ -1040,18 +1036,21 @@ Archive:
     }
 
     #[test]
-    fn symbols_heading_without_text_yields_no_symbol() {
-        // `text` is required: a heading with no body is an ERROR node and
-        // yields no symbol.
-        assert!(symbols_of(":\n").is_empty());
+    fn symbols_heading_without_text_is_a_task_symbol() {
+        // SPEC タスク: `:` で始まる行はタスク行（本文 `:`）で、アウトライン
+        // にも本文どおりのシンボルが出る。
+        let s = symbols_of(":\n");
+        assert_eq!(top_names(&s), [":"]);
+        assert_eq!(s[0].kind, SymbolKind::STRING);
     }
 
     #[test]
     fn symbols_leading_tag_column_is_not_in_names() {
         // アウトライン表示名: headings use the body before `:`, tasks the
-        // body minus tags — the leading tag column is excluded in both.
+        // body minus tags. 見出しの行頭タグ字面は本文（SPEC 行頭タグ列）なので
+        // 表示名に含まれ、タスク行の行頭タグ列は除かれる。
         let s = symbols_of("@done Project:\n  @waiting buy milk @queue(1)\n");
-        assert_eq!(top_names(&s), ["Project"]);
+        assert_eq!(top_names(&s), ["@done Project"]);
         assert_eq!(child_names(&s[0]), ["buy milk"]);
     }
 
@@ -1367,21 +1366,13 @@ Archive:
     }
 
     #[test]
-    fn diagnostics_messages_in_allowed_set() {
-        // The walk surfaces both ERROR nodes ("syntax error") and
-        // non-traversable MISSING descendants ("missing syntax element").
-        // A textless heading yields an ERROR node; tag-only lines and
-        // unclosed tags are body text / task lines and stay clean.
-        for input in [":", ": @done"] {
+    fn diagnostics_colon_initial_lines_are_clean() {
+        // SPEC タスク: `:` で始まる行はタスク行。本文・タグ列のどの組合せでも
+        // 構文エラーにならない。tag-only lines and unclosed tags are body
+        // text / task lines and stay clean.
+        for input in [":", ": @done", ":foo", ":foo:"] {
             let diags = diags_of(input);
-            assert!(!diags.is_empty(), "expected diagnostics for {input:?}");
-            for d in &diags {
-                assert!(
-                    d.message == "syntax error" || d.message == "missing syntax element",
-                    "unexpected message {:?} for {input:?}",
-                    d.message
-                );
-            }
+            assert!(diags.is_empty(), "expected clean {input:?}, got {diags:?}");
         }
         for input in ["@done", "@done @waiting", "@done("] {
             assert!(diags_of(input).is_empty(), "expected clean {input:?}");
@@ -1497,8 +1488,9 @@ Archive:
     }
 
     #[test]
-    fn semantic_tokens_heading_without_text_is_empty() {
-        // ":\n" is a syntax error (text is required), so no tokens are emitted.
+    fn semantic_tokens_colon_only_task_line_is_empty() {
+        // `:` は本文1文字のタスク行で、灰色行でも装飾対象でもないため、
+        // token を出さない（SPEC §表示）。
         assert!(semantic_tokens_of(":\n").is_empty());
     }
 
@@ -1558,12 +1550,13 @@ Archive:
     }
 
     #[test]
-    fn semantic_tokens_done_leading_column_on_heading_is_grayed() {
-        // 適用規則 2 beats 5: a heading with a leading @done is a gray line
-        // (見出し行 = 任意の行頭タグ列 + 本文 + `:` + 行末タグ列).
+    fn semantic_tokens_done_leading_column_on_heading_is_not_grayed() {
+        // 適用規則 5: 見出しの行頭タグ字面は本文（SPEC 行頭タグ列はタスク行
+        // の構成要素）なので灰色行にせず、見出しの本文+コロンとして表示する。
         let abs = abs_positions(&semantic_tokens_of("@done Project:\n"));
-        assert_eq!(abs.len(), 1);
-        assert_eq!(abs[0], (0, 0, 14, tt::TODO_LINE, 0));
+        assert_eq!(abs.len(), 2);
+        assert_eq!(abs[0], (0, 0, 13, tt::TODO_HEADING_CONTENT, 0));
+        assert_eq!(abs[1], (0, 13, 1, tt::TODO_HEADING_SYMBOL, 0));
     }
 
     #[test]

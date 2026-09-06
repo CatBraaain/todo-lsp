@@ -353,6 +353,28 @@ mod tests {
     }
 
     #[test]
+    fn toggle_on_heading_leading_tag_tokens_appends_to_tag_column() {
+        // SPEC 行頭タグ列: a heading has no leading tag column, so the
+        // `@done` token is body text — the line counts as tag-less and the
+        // toggle appends to the trailing column. Toggling again removes the
+        // real tag but keeps the body token in place.
+        let out = toggle("@done List:\n", &[0], Toggle::Done, today());
+        assert_eq!(out, "@done List: @done(2024-06-15)\n");
+        let out = toggle("@done List: @done(2024-06-15)\n", &[0], Toggle::Done, today());
+        assert_eq!(out, "@done List:\n");
+    }
+
+    #[test]
+    fn toggle_on_colon_body_task_line() {
+        // SPEC タスク: `:` で始まる行はタスク行（本文 `:`）。トグルは本文を保ち、
+        // 行末タグ列を追加・除去する。
+        let out = toggle(":\n", &[0], Toggle::Done, today());
+        assert_eq!(out, ": @done(2024-06-15)\n");
+        let out = toggle(": @done\n", &[0], Toggle::Done, today());
+        assert_eq!(out, ":\n");
+    }
+
+    #[test]
     fn toggle_on_crlf_document_behaves_like_lf() {
         // Regression: the trailing CR used to hide the tag column, so
         // toggling @done on `task @done\r` duplicated the tag instead of

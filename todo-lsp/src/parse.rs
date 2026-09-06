@@ -103,10 +103,44 @@ mod tests {
     }
 
     #[test]
-    fn broken_input_sets_has_error() {
-        // A textless heading (`:`) cannot be a heading_line and cannot be
-        // recovered; tree-sitter yields an ERROR node.
-        assert!(has_error(":"));
+    fn colon_only_line_is_a_task_line() {
+        // A textless `:` used to be an unrecoverable error; per SPEC タスク,
+        // a `:` at the body start is body text, so the line parses cleanly
+        // as a task line.
+        assert!(!has_error(":"));
+        assert_eq!(first_named_child_kind(":").as_deref(), Some("task_line"));
+    }
+
+    #[test]
+    fn colon_initial_lines_parse() {
+        // `: @done` — body `:` plus a trailing tag column.
+        assert!(!has_error(": @done"));
+        assert_eq!(first_named_child_kind(": @done").as_deref(), Some("task_line"));
+        // `:foo:` — body `:foo` ends at the rightmost colon: a heading.
+        let input = ":foo:\n  task\n";
+        assert!(!has_error(input));
+        assert_eq!(first_named_child_kind(input).as_deref(), Some("heading_block"));
+    }
+
+    #[test]
+    fn trailing_whitespace_and_missing_final_newline_are_clean() {
+        // Trailing whitespace used to trip the external scanner into emitting
+        // INDENT mid-line, turning every line-final space into an ERROR. The
+        // scanner now consumes trailing whitespace itself (SPEC §診断: no
+        // syntax errors), and a missing final newline still gets its EOF
+        // NEWLINE + DEDENT.
+        for input in [
+            "x \n",
+            "x ",
+            "task @done  \n",
+            "A:\n  b ",
+            "x\n  y \n  z\n",
+            "  indented \n",
+            "a  b\tc\n",
+            "@done @waiting  \n",
+        ] {
+            assert!(!has_error(input), "expected clean {input:?}");
+        }
     }
 
     #[test]
@@ -137,4 +171,12 @@ mod tests {
         assert_eq!(first, second);
     }
 }
+
+
+
+
+
+
+
+
 

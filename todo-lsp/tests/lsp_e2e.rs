@@ -516,12 +516,10 @@ fn folding_range_returns_gray_ranges_as_comments() {
     s.shutdown_and_exit();
 }
 
-/// A textless heading yields an ERROR node, so the server must publish at
-/// least one ERROR-severity diagnostic. Both ERROR nodes and non-traversable
-/// MISSING descendants are reported as ERROR-severity diagnostics (see
-/// `analysis::diagnostics`).
+/// SPEC タスク: a `:` at the line start is body text of a task line, so a
+/// colon-only document is clean and must publish empty diagnostics.
 #[test]
-fn broken_input_publishes_error_diagnostics() {
+fn colon_only_document_publishes_empty_diagnostics() {
     let mut s = LspSession::spawn();
 
     let init_id = s.send_request(
@@ -547,15 +545,10 @@ fn broken_input_publishes_error_diagnostics() {
     let diags = diag_msg["params"]["diagnostics"]
         .as_array()
         .expect("diagnostics array");
-    assert!(!diags.is_empty(), "broken input must produce diagnostics");
-    for d in diags {
-        assert_eq!(
-            d["severity"].as_i64().unwrap(),
-            1,
-            "must be ERROR severity: {d}"
-        );
-        assert_eq!(d["source"].as_str().unwrap(), "todo");
-    }
+    assert!(
+        diags.is_empty(),
+        "a colon-only task line must stay clean: {diags:?}"
+    );
 
     s.shutdown_and_exit();
 }
@@ -854,11 +847,11 @@ fn diagnostics_update_on_change_and_clear_on_close() {
     );
     let broken = s.await_notification("textDocument/publishDiagnostics");
     assert!(
-        !broken["params"]["diagnostics"]
+        broken["params"]["diagnostics"]
             .as_array()
             .unwrap()
             .is_empty(),
-        "broken input must publish diagnostics"
+        "a colon-only task line must stay clean"
     );
 
     // Full change to a clean document -> empty diagnostics.

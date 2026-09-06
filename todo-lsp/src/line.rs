@@ -34,7 +34,8 @@ pub enum Kind {
     /// Blank or whitespace-only line: not part of the document structure.
     Blank,
     /// 見出し行: non-empty body, then `:`, then an optional trailing tag
-    /// column, with an optional leading tag column before the body.
+    /// column. Leading tag-like tokens are body text (SPEC 行頭タグ列
+    /// applies to task lines only).
     /// The value is the byte index of the `:`.
     Heading { colon: usize },
     /// タスク行: an optional leading tag column, a body that may be empty
@@ -284,10 +285,16 @@ pub fn parse_line(line: &str) -> LineParts {
         Some(c) => Kind::Heading { colon: c },
         None => Kind::Task,
     };
-    // Heading text excludes the `:`; task text excludes trailing whitespace.
+    // 見出し行は行頭タグ列を持たず、行頭のタグ字面は本文に含める（SPEC 用語
+    // 行頭タグ列）。タスク行だけが行頭タグ列を持つ。Heading text excludes
+    // the `:`; task text excludes trailing whitespace.
+    let (leading_tags, text_start) = match colon {
+        Some(_) => (Vec::new(), indent_len),
+        None => (leading_tags, content_start),
+    };
     let text_end = match colon {
-        Some(c) => c - content_start,
-        None => body.trim_end_matches([' ', '\t']).len(),
+        Some(c) => c,
+        None => text_start + body.trim_end_matches([' ', '\t']).len(),
     };
     LineParts {
         kind,
@@ -295,7 +302,7 @@ pub fn parse_line(line: &str) -> LineParts {
         units,
         level,
         leading_tags,
-        text_range: (content_start, content_start + text_end),
+        text_range: (text_start, text_end),
         tags,
     }
 }
@@ -667,8 +674,40 @@ mod tests {
 
     #[test]
     fn colon_without_text_is_not_heading() {
-        assert_eq!(parts(":").kind, Kind::Task); // error line; body is ":"
-        assert_eq!(parts(": @done").kind, Kind::Task);
+        // A `:` at the line start is body text (SPEC 見出し行 requires a
+        // non-empty body before the `:`), so these are task lines.
+        let p = parts(":");
+        assert_eq!(p.kind, Kind::Task);
+        assert_eq!(p.text_range, (0, 1));
+        let p = parts(": @done");
+        assert_eq!(p.kind, Kind::Task);
+        assert_eq!(p.text(": @done"), ":");
+        assert_eq!(tag_names(": @done"), ["done"]);
+    }
+
+    #[test]
+    fn colon_initial_body_classification() {
+        // `:foo` — body continues after the colon, so not a heading.
+        let p = parts(":foo");
+        assert_eq!(p.kind, Kind::Task);
+        assert_eq!(p.text(":foo"), ":foo");
+        // `:foo:` — the rightmost colon ends the body, so it is a heading.
+        let p = parts(":foo:");
+        assert_eq!(p.kind, Kind::Heading { colon: 4 });
+        assert_eq!(p.text(":foo:"), ":foo");
+    }
+
+    #[test]
+    fn tag_name_may_contain_colon() {
+        // SPEC タグ: `name` excludes only whitespace and `(` — `@done:` is a
+        // leading tag named `done:`, so the line is not a heading and its
+        // body is the text after the tag column.
+        let line = "@done: 名前はコロンを含めるため見出しにならない";
+        let p = parts(line);
+        assert_eq!(p.kind, Kind::Task);
+        assert_eq!(p.leading_tags.len(), 1);
+        assert_eq!(p.leading_tags[0].name, "done:");
+        assert_eq!(p.text(line), "名前はコロンを含めるため見出しにならない");
     }
 
     #[test]
@@ -731,6 +770,16 @@ mod tests {
     }
 
     #[test]
+    fn normalize_body_heading_leading_tag_tokens_stay_body() {
+        // Heading leading tag-like tokens are body text: normalization keeps
+        // them in place before the `:`, and the `@done` token does not act as
+        // a tag (so it is not moved or dropped).
+        let line = "  @done   Foo:  ";
+        let p = parts(line);
+        assert_eq!(p.normalize_body(line), "@done Foo:");
+    }
+
+    #[test]
     fn normalize_body_blank_and_tag_only() {
         assert_eq!(parts("").normalize_body(""), "");
         assert_eq!(parts("  ").normalize_body("  "), "");
@@ -766,13 +815,17 @@ mod tests {
 
     #[test]
     fn leading_tag_column_on_heading() {
+        // SPEC 行頭タグ列: a leading tag column exists on task lines only.
+        // On a heading the tag-like tokens are body text: no gray rule, and
+        // the text range covers the whole body including the tokens.
         let line = "@done Project: @queue(1)";
         let p = parts(line);
         assert_eq!(p.kind, Kind::Heading { colon: 13 });
-        assert_eq!(p.leading_tags.len(), 1);
-        assert_eq!(p.text(line), "Project");
+        assert!(p.leading_tags.is_empty());
+        assert_eq!(p.text(line), "@done Project");
         assert!(p.tags.iter().map(|t| t.name.clone()).eq(["queue".to_string()]));
-        assert_eq!(p.gray(), Some(Gray::Done));
+        assert_eq!(p.gray(), None);
+        assert_eq!(p.task_text(line), "@done Project:");
     }
 
     #[test]
