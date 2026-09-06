@@ -29,6 +29,10 @@
               {
                 "type": "SYMBOL",
                 "name": "task_line"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "tag_only_line"
               }
             ]
           }
@@ -121,6 +125,10 @@
           {
             "type": "SYMBOL",
             "name": "task_line"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "tag_only_line"
           }
         ]
       }
@@ -144,6 +152,30 @@
             },
             {
               "type": "REPEAT",
+              "content": {
+                "type": "SYMBOL",
+                "name": "tag"
+              }
+            },
+            {
+              "type": "SYMBOL",
+              "name": "_newline"
+            }
+          ]
+        }
+      }
+    },
+    "tag_only_line": {
+      "type": "PREC",
+      "value": 1,
+      "content": {
+        "type": "PREC_LEFT",
+        "value": 0,
+        "content": {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "REPEAT1",
               "content": {
                 "type": "SYMBOL",
                 "name": "tag"

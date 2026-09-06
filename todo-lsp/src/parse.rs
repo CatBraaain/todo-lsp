@@ -104,9 +104,17 @@ mod tests {
 
     #[test]
     fn broken_input_sets_has_error() {
-        // `@done(` with no preceding text: `text` is required, so the line
-        // cannot be a `task_line`; tree-sitter yields an ERROR node.
-        assert!(has_error("@done("));
+        // A textless heading (`:`) cannot be a heading_line and cannot be
+        // recovered; tree-sitter yields an ERROR node.
+        assert!(has_error(":"));
+    }
+
+    #[test]
+    fn unclosed_tag_line_is_body_text() {
+        // SPEC タグの構文: an unclosed argument is body text, so `@done(`
+        // alone parses as a task line with no error.
+        assert!(!has_error("@done("));
+        assert_eq!(first_named_child_kind("@done(").as_deref(), Some("task_line"));
     }
 
     #[test]

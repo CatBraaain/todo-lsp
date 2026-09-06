@@ -291,6 +291,15 @@ Archive:
     }
 
     #[test]
+    fn archive_moves_leading_gray_and_tag_only_blocks() {
+        // A leading tag column grays the line too (SPEC 灰色行); a tag-only
+        // line is a gray task line with no body. Both are archivable.
+        let input = "keep\n@done gray body\n@cancelled\n";
+        let out = archive(input, &[1, 2]);
+        assert_eq!(out, "keep\n\nArchive:\n    @done gray body\n    @cancelled\n");
+    }
+
+    #[test]
     fn archive_moves_multiple_blocks_in_document_order() {
         let input = "L:\n    keep\none @done\ntwo @cancelled\n";
         let out = archive(input, &[2, 3]);

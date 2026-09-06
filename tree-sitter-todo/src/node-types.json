@@ -70,6 +70,10 @@
           "named": true
         },
         {
+          "type": "tag_only_line",
+          "named": true
+        },
+        {
           "type": "task_line",
           "named": true
         }
@@ -103,6 +107,21 @@
     }
   },
   {
+    "type": "tag_only_line",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "tag",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "task_block",
     "named": true,
     "fields": {},
@@ -112,6 +131,10 @@
       "types": [
         {
           "type": "heading_block",
+          "named": true
+        },
+        {
+          "type": "tag_only_line",
           "named": true
         },
         {

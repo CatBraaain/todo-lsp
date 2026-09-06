@@ -39,15 +39,93 @@ task
     (text)))
 
 ===
-Line with only tags is an error
+Line with only tags is a tag-only task line
 ===
 
 @done
 ---
 
 (source_file
-  (ERROR
-    (UNEXPECTED 'd')))
+  (tag_only_line
+    (tag
+      (name))))
+
+===
+Multiple tags with no body are a tag-only line
+===
+
+@done @waiting
+---
+
+(source_file
+  (tag_only_line
+    (tag
+      (name))
+    (tag
+      (name))))
+
+===
+Leading tag column is part of the text token
+===
+
+@done buy milk
+---
+
+(source_file
+  (task_line
+    (text)))
+
+===
+Leading tag column with trailing tag column
+===
+
+@done buy milk @queue(1)
+---
+
+(source_file
+  (task_line
+    (text)
+    (tag
+      (name)
+      (arg))))
+
+===
+Leading tag column on a heading line
+===
+
+@done Project: @queue(1)
+---
+
+(source_file
+  (heading_block
+    (heading_line
+      (text)
+      (colon)
+      (tag
+        (name)
+        (arg)))))
+
+===
+Tag in the middle of the body stays in the text
+===
+
+buy @done milk
+---
+
+(source_file
+  (task_line
+    (text)))
+
+===
+Unclosed tag argument is body text
+===
+
+@done(
+---
+
+(source_file
+  (task_line
+    (text)))
 
 ===
 Header without text is an error
@@ -70,9 +148,36 @@ Header with only a tag is an error
 (source_file
   (ERROR
     (colon)
-    (indent)
-    (dedent)
-    (UNEXPECTED 'd')))
+    (indent))
+  (tag_only_line
+    (tag
+      (name))))
+
+===
+Tag glued to the heading colon is body text
+===
+
+Foo:@tag
+---
+
+(source_file
+  (task_line
+    (text)))
+
+===
+Tag after a heading colon requires a space
+===
+
+Foo: @tag
+---
+
+(source_file
+  (heading_block
+    (heading_line
+      (text)
+      (colon)
+      (tag
+        (name)))))
 
 ===
 Colon in text body is not a header

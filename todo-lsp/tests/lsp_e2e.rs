@@ -516,10 +516,10 @@ fn folding_range_returns_gray_ranges_as_comments() {
     s.shutdown_and_exit();
 }
 
-/// An unclosed tag with no preceding text yields an ERROR node, so the server
-/// must publish at least one ERROR-severity diagnostic. Both ERROR nodes and
-/// non-traversable MISSING descendants are reported as ERROR-severity
-/// diagnostics (see `analysis::diagnostics`).
+/// A textless heading yields an ERROR node, so the server must publish at
+/// least one ERROR-severity diagnostic. Both ERROR nodes and non-traversable
+/// MISSING descendants are reported as ERROR-severity diagnostics (see
+/// `analysis::diagnostics`).
 #[test]
 fn broken_input_publishes_error_diagnostics() {
     let mut s = LspSession::spawn();
@@ -538,7 +538,7 @@ fn broken_input_publishes_error_diagnostics() {
                 "uri": SAMPLE_URI,
                 "languageId": "todo",
                 "version": 1,
-                "text": "@done(",
+                "text": ":",
             }
         }),
     );
@@ -848,7 +848,7 @@ fn diagnostics_update_on_change_and_clear_on_close() {
         "textDocument/didOpen",
         json!({
             "textDocument": {
-                "uri": SAMPLE_URI, "languageId": "todo", "version": 1, "text": "@done(",
+                "uri": SAMPLE_URI, "languageId": "todo", "version": 1, "text": ":",
             }
         }),
     );

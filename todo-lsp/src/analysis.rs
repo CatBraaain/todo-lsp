@@ -29,10 +29,20 @@ fn symbols_from_children(node: Node, source: &[u8]) -> Vec<DocumentSymbol> {
 fn symbol_from_node(node: &Node, source: &[u8]) -> Option<DocumentSymbol> {
     match node.kind() {
         "heading_block" => Some(symbol_from_heading_block(node, source)),
-        "task_line" => Some(symbol_from_task_line(node, source)),
+        "task_line" | "tag_only_line" => Some(symbol_from_task_line(node, source)),
         // indent, dedent, task_block (handled by its parent) -> skip
         _ => None,
     }
+}
+
+/// The physical line text covered by a line node (trailing newlines and
+/// blank runs stripped — `_newline` consumes `\n` runs as one token). The
+/// node starts after the indent; `parse_line` accepts that slice directly.
+fn line_text_of<'a>(node: &Node<'a>, source: &'a [u8]) -> &'a str {
+    let start = node.start_byte();
+    let end = node.end_byte();
+    let text = std::str::from_utf8(&source[start..end]).unwrap_or("");
+    text.trim_end_matches(['\n', '\r', ' ', '\t'])
 }
 
 fn symbol_from_heading_block(node: &Node, source: &[u8]) -> DocumentSymbol {
@@ -48,12 +58,12 @@ fn symbol_from_heading_block(node: &Node, source: &[u8]) -> DocumentSymbol {
 
     let (name, selection_range) = match heading_line {
         Some(hl) => {
-            let text = hl
-                .child_by_field_name("text")
-                .and_then(|t| t.utf8_text(source).ok())
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default();
-            (text, range_from_node(&hl))
+            // The symbol name is the body text (SPEC アウトライン: `:` の前の
+            // 本文). The tree's `text` field embeds the leading tag column in
+            // the TEXT token, so re-parse the line instead of using the field.
+            let line = line_text_of(&hl, source);
+            let name = crate::line::parse_line(line).text(line).to_string();
+            (name, range_from_node(&hl))
         }
         None => (String::new(), range_from_node(node)),
     };
@@ -77,11 +87,12 @@ fn symbol_from_heading_block(node: &Node, source: &[u8]) -> DocumentSymbol {
 }
 
 fn symbol_from_task_line(node: &Node, source: &[u8]) -> DocumentSymbol {
-    let name = node
-        .child_by_field_name("text")
-        .and_then(|t| t.utf8_text(source).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
+    // The symbol name is the body text (SPEC アウトライン: タグを除いた本文).
+    // The tree's `text` field embeds the leading tag column in the TEXT
+    // token, so re-parse the line instead of using the field. Tag-only
+    // lines (no `text` child) get an empty name.
+    let line = line_text_of(node, source);
+    let name = crate::line::parse_line(line).text(line).to_string();
 
     let range = range_from_node(node);
     make_symbol(name, SymbolKind::STRING, range, range, None)
@@ -263,7 +274,7 @@ fn is_gray_block(node: &Node, tones: &[LineTone]) -> bool {
 /// zero-width `dedent` can point past its child block, so use `task_block.end`.
 fn last_line_of_block(node: &Node) -> Option<usize> {
     let end_row = match node.kind() {
-        "task_line" => node.end_position().row,
+        "task_line" | "tag_only_line" => node.end_position().row,
         "heading_block" => named_children_of(node)
             .into_iter()
             .find(|child| child.kind() == "task_block")
@@ -643,6 +654,9 @@ fn classify_line(
     // 適用規則 5: 見出し行 — content + symbol + the tag column; no stylings.
     if let Some(colon) = parts.colon() {
         let (text_start, text_end) = parts.text_range;
+        for tag in &parts.leading_tags {
+            push_tag_token(tag, line_idx, now, raw);
+        }
         if text_end > text_start {
             raw.push((
                 line_idx,
@@ -658,12 +672,17 @@ fn classify_line(
         }
         return;
     }
-    // 適用規則 6: 通常行 — the tag column, plus stylings over the body text.
-    for tag in &parts.tags {
+    // 適用規則 6: 通常行 — both tag columns, plus stylings over the body
+    // text. Tokens stay ordered by position: leading tags, body stylings,
+    // trailing tags.
+    for tag in &parts.leading_tags {
         push_tag_token(tag, line_idx, now, raw);
     }
     let (text_start, text_end) = parts.text_range;
     scan_styles(&line[text_start..text_end], text_start, line_idx, raw);
+    for tag in &parts.tags {
+        push_tag_token(tag, line_idx, now, raw);
+    }
 }
 
 /// Push one token for a tag-column [`Tag`], with the date/cron modifiers for
@@ -965,13 +984,23 @@ Archive:
 
     #[test]
     fn broken_input_has_diagnostics() {
-        // `@done(` — a tag whose argument is never closed. With no preceding
-        // text the grammar cannot recover, so tree-sitter yields an ERROR node.
-        let (_, _, diags) = analyze("@done(");
+        // `:` — a heading without a body. The line cannot be a heading_line
+        // (text is required) and cannot be recovered, so tree-sitter yields
+        // an ERROR node.
+        let (_, _, diags) = analyze(":");
         assert!(!diags.is_empty(), "expected at least one diagnostic");
         assert!(diags
             .iter()
             .all(|d| d.severity == Some(DiagnosticSeverity::ERROR)));
+    }
+
+    #[test]
+    fn unclosed_tag_line_has_no_diagnostics() {
+        // SPEC タグの構文: a tag whose argument is never closed is not a
+        // tag column — `@done(` alone is body text, so the line is a plain
+        // task line with no errors.
+        let (_, _, diags) = analyze("@done(");
+        assert!(diags.is_empty(), "expected no diagnostics, got {diags:?}");
     }
 
     // ----- document_symbols (corpus behaviors mirrored at the symbol level) -----
@@ -1002,16 +1031,28 @@ Archive:
     }
 
     #[test]
-    fn symbols_tag_only_line_yields_no_symbol() {
-        // `text` is required: a tag-only line is an ERROR node, not a task.
-        assert!(symbols_of("@done\n").is_empty());
+    fn symbols_tag_only_line_yields_empty_symbol() {
+        // A tag-only line is a task line whose body is empty, so its symbol
+        // name is the body text: empty (SPEC アウトライン).
+        let s = symbols_of("@done\n");
+        assert_eq!(top_names(&s), [""]);
+        assert_eq!(s[0].kind, SymbolKind::STRING);
     }
 
     #[test]
     fn symbols_heading_without_text_yields_no_symbol() {
-        // `text` is required: a heading with no body is an ERROR node.
-        assert!(symbols_of(": @done\n").is_empty());
+        // `text` is required: a heading with no body is an ERROR node and
+        // yields no symbol.
         assert!(symbols_of(":\n").is_empty());
+    }
+
+    #[test]
+    fn symbols_leading_tag_column_is_not_in_names() {
+        // アウトライン表示名: headings use the body before `:`, tasks the
+        // body minus tags — the leading tag column is excluded in both.
+        let s = symbols_of("@done Project:\n  @waiting buy milk @queue(1)\n");
+        assert_eq!(top_names(&s), ["Project"]);
+        assert_eq!(child_names(&s[0]), ["buy milk"]);
     }
 
     #[test]
@@ -1123,6 +1164,28 @@ Archive:
         assert_eq!(r[1].start_line, 1);
         assert_eq!(r[1].end_line, 2);
         assert_eq!(r[1].kind, Some(FoldingRangeKind::Comment));
+    }
+
+    #[test]
+    fn fold_gray_children_with_leading_tag_columns() {
+        // Leading tag columns gray their lines (灰色行), so they count as
+        // the document-level leading gray blocks.
+        let r = folds_of("@done x\n@hide y\nc\n");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 1);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
+    }
+
+    #[test]
+    fn fold_gray_run_including_tag_only_lines() {
+        // Tag-only lines (no body) are gray task lines too, so they join
+        // the leading gray run of the document-level fold.
+        let r = folds_of("@done\n@cancelled\nplain\n");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 1);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
     }
 
     #[test]
@@ -1295,41 +1358,21 @@ Archive:
 
     #[test]
     fn diagnostics_broken_unclosed_tag() {
-        let diags = diags_of("@done(");
-        assert!(!diags.is_empty(), "expected at least one diagnostic");
-        assert!(diags
-            .iter()
-            .all(|d| d.severity == Some(DiagnosticSeverity::ERROR)));
-        assert!(diags.iter().all(|d| d.source.as_deref() == Some("todo")));
-    }
-
-    #[test]
-    fn diagnostics_broken_indented_tag() {
-        // Complements `broken_input_has_diagnostics`, which only covers the
-        // no-text case. Here a broken tag follows a top-level task line on the
-        // next indented line; tree-sitter yields an ERROR node.
-        let diags = diags_of("task\n  @done(");
-        assert!(!diags.is_empty(), "expected at least one diagnostic");
-        assert!(diags
-            .iter()
-            .all(|d| d.severity == Some(DiagnosticSeverity::ERROR)));
-        assert!(diags.iter().all(|d| d.source.as_deref() == Some("todo")));
+        // SPEC タグの構文: an unclosed argument makes the token body text,
+        // so neither the plain nor the indented form is an error.
+        for input in ["@done(", "task\n  @done(", "Project:\n  @done("] {
+            let diags = diags_of(input);
+            assert!(diags.is_empty(), "expected no diagnostics for {input:?}, got {diags:?}");
+        }
     }
 
     #[test]
     fn diagnostics_messages_in_allowed_set() {
         // The walk surfaces both ERROR nodes ("syntax error") and
         // non-traversable MISSING descendants ("missing syntax element").
-        // `@done(` and the indented variant yield ERROR nodes; the
-        // heading-indented form yields a MISSING _newline. A tag-only line
-        // and a textless heading are plain ERROR nodes.
-        for input in [
-            "@done(",
-            "task\n  @done(",
-            "Project:\n  @done(",
-            "@done",
-            ":",
-        ] {
+        // A textless heading yields an ERROR node; tag-only lines and
+        // unclosed tags are body text / task lines and stay clean.
+        for input in [":", ": @done"] {
             let diags = diags_of(input);
             assert!(!diags.is_empty(), "expected diagnostics for {input:?}");
             for d in &diags {
@@ -1340,24 +1383,18 @@ Archive:
                 );
             }
         }
+        for input in ["@done", "@done @waiting", "@done("] {
+            assert!(diags_of(input).is_empty(), "expected clean {input:?}");
+        }
     }
 
     #[test]
     fn diagnostics_indented_tag_only_line_is_error_on_its_row() {
-        // `@done(` indented under a heading: with `text` required, the
-        // tag-only line is a plain ERROR node ("syntax error") sitting on
-        // the indented row (row 1), not on the heading.
+        // An indented unclosed tag is body text of a task line: clean, no
+        // diagnostics on any row (regression: it used to be a plain ERROR
+        // node sitting on the indented row when text was required).
         let diags = diags_of("Project:\n  @done(");
-        assert!(!diags.is_empty());
-        for d in &diags {
-            assert_eq!(d.message, "syntax error", "got {diags:?}");
-            assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
-            assert_eq!(d.source.as_deref(), Some("todo"));
-            assert_eq!(
-                d.range.start.line, 1,
-                "diagnostic must sit on the indented line, got {diags:?}"
-            );
-        }
+        assert!(diags.is_empty(), "got {diags:?}");
     }
 
     /// Decode delta-encoded tokens back to absolute (line, col, len, type,
@@ -1502,6 +1539,31 @@ Archive:
         let abs = abs_positions(&semantic_tokens_of("task @done\n"));
         assert_eq!(abs.len(), 1);
         assert_eq!(abs[0], (0, 0, 10, tt::TODO_LINE, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_done_in_leading_column_is_grayed() {
+        // SPEC 灰色行 via the leading tag column: the whole line is one
+        // gray token, inner tags suppressed.
+        let abs = abs_positions(&semantic_tokens_of("@done buy milk\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 14, tt::TODO_LINE, 0));
+    }
+
+    #[test]
+    fn semantic_tokens_cancelled_in_leading_column_is_grayed_italic() {
+        let abs = abs_positions(&semantic_tokens_of("@cancelled buy milk\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 19, tt::TODO_LINE, tm::ITALIC));
+    }
+
+    #[test]
+    fn semantic_tokens_done_leading_column_on_heading_is_grayed() {
+        // 適用規則 2 beats 5: a heading with a leading @done is a gray line
+        // (見出し行 = 任意の行頭タグ列 + 本文 + `:` + 行末タグ列).
+        let abs = abs_positions(&semantic_tokens_of("@done Project:\n"));
+        assert_eq!(abs.len(), 1);
+        assert_eq!(abs[0], (0, 0, 14, tt::TODO_LINE, 0));
     }
 
     #[test]

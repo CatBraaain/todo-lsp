@@ -144,6 +144,18 @@ mod tests {
     }
 
     #[test]
+    fn rule2_keeps_leading_tag_column_at_line_start() {
+        let input = "   @done   buy   milk   @queue(1)   \n";
+        assert_eq!(fmt(input), "@done buy milk @queue(1)\n");
+    }
+
+    #[test]
+    fn rule2_tag_only_line() {
+        let input = "   @done   @waiting   \n";
+        assert_eq!(fmt(input), "@done @waiting\n");
+    }
+
+    #[test]
     fn rule2_heading_tokens() {
         let input = "  Foo  bar:  @a   @b\n";
         assert_eq!(fmt(input), "Foo bar: @a @b\n");

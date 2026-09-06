@@ -82,12 +82,17 @@ pub fn toggle(text: &str, selection: &[usize], action: Toggle, today: NaiveDate)
     let queue_number = next_queue_number(&lines);
 
     if all_have {
-        // 共通規則 3: every selected line has the tag -> remove it from all.
+        // 共通規則 3: every selected line has the tag -> remove it from all
+        // columns (leading and trailing).
         for &i in &targets {
-            lines[i] = retag(&lines[i], |tags| tags.retain(|t| t.name != name));
+            lines[i] = retag(&lines[i], |leading, trailing| {
+                leading.retain(|t| t.name != name);
+                trailing.retain(|t| t.name != name);
+            });
         }
     } else {
         // 共通規則 2: add the tag to the lines that lack it (the others stay).
+        // The tag is appended to the trailing column (SPEC: 行の末尾に追加).
         for &i in &targets {
             let parts = line::parse_line(&lines[i]);
             if parts.has_tag(name) {
@@ -95,9 +100,10 @@ pub fn toggle(text: &str, selection: &[usize], action: Toggle, today: NaiveDate)
             }
             let removes = action.removes_on_add();
             let tag = Tag::from_text(&action.tag_text(today, queue_number));
-            lines[i] = retag(&lines[i], |tags| {
-                tags.retain(|t| !removes.contains(&t.name.as_str()));
-                tags.push(tag.clone());
+            lines[i] = retag(&lines[i], |leading, trailing| {
+                leading.retain(|t| !removes.contains(&t.name.as_str()));
+                trailing.retain(|t| !removes.contains(&t.name.as_str()));
+                trailing.push(tag.clone());
             });
         }
     }
@@ -144,7 +150,7 @@ fn next_queue_number(lines: &[String]) -> usize {
 fn renumber_queues(lines: &mut [String]) {
     let mut numbers: Vec<u64> = Vec::new();
     for l in lines.iter() {
-        for tag in &line::parse_line(l).tags {
+        for tag in line::parse_line(l).all_tags() {
             if tag.name == "queue" {
                 if let Some(n) = tag.arg.as_deref().and_then(|a| a.parse().ok()) {
                     numbers.push(n);
@@ -157,19 +163,23 @@ fn renumber_queues(lines: &mut [String]) {
     for i in 0..lines.len() {
         let raw = lines[i].clone();
         let parts = line::parse_line(&raw);
-        if !parts.tags.iter().any(|t| t.name == "queue") {
+        if !parts.has_tag("queue") {
             continue;
         }
-        let mut tags = parts.tags.clone();
-        for tag in &mut tags {
-            if tag.name == "queue" {
-                if let Some(n) = tag.arg.as_deref().and_then(|a| a.parse::<u64>().ok()) {
-                    let rank = numbers.iter().position(|&m| m == n).unwrap() + 1;
-                    tag.arg = Some(rank.to_string());
+        let renumber = |tags: &mut Vec<Tag>| {
+            for tag in tags.iter_mut() {
+                if tag.name == "queue" {
+                    if let Some(n) = tag.arg.as_deref().and_then(|a| a.parse::<u64>().ok()) {
+                        let rank = numbers.iter().position(|&m| m == n).unwrap() + 1;
+                        tag.arg = Some(rank.to_string());
+                    }
                 }
             }
-        }
-        lines[i] = line::indent_for_level(parts.level) + &line::render(&parts, &raw, &tags);
+        };
+        lines[i] = retag(&raw, |leading, trailing| {
+            renumber(leading);
+            renumber(trailing);
+        });
     }
 }
 
@@ -186,16 +196,19 @@ fn structure_lines(lines: &[String], selection: &[usize]) -> Vec<usize> {
     out
 }
 
-/// Rebuild a line with an edited tag column, normalized per §フォーマット
+/// Rebuild a line with edited tag columns, normalized per §フォーマット
 /// rules 1-2 (indent from the line's current level, single-spaced tokens).
-fn retag(raw: &str, edit_tags: impl FnOnce(&mut Vec<Tag>)) -> String {
+/// The closure edits the leading and trailing columns; new tags go into the
+/// trailing column (SPEC: 行の末尾に追加).
+fn retag(raw: &str, edit_tags: impl FnOnce(&mut Vec<Tag>, &mut Vec<Tag>)) -> String {
     let parts = line::parse_line(raw);
-    let mut tags = parts.tags.clone();
-    edit_tags(&mut tags);
+    let mut leading = parts.leading_tags.clone();
+    let mut trailing = parts.tags.clone();
+    edit_tags(&mut leading, &mut trailing);
     format!(
         "{}{}",
         line::indent_for_level(parts.level),
-        line::render(&parts, raw, &tags)
+        line::render(&parts, raw, &leading, &trailing)
     )
 }
 
@@ -265,6 +278,39 @@ mod tests {
     fn toggle_appends_after_existing_tags() {
         let out = toggle("task @priority(high)\n", &[0], Toggle::Pending, today());
         assert_eq!(out, "task @priority(high) @pending\n");
+    }
+
+    #[test]
+    fn toggle_appends_to_trailing_column_of_leading_tag_lines() {
+        // 共通規則 2: the tag is appended at the line end; the leading tag
+        // column stays at the line start.
+        let out = toggle("@waiting buy milk\n", &[0], Toggle::Pending, today());
+        assert_eq!(out, "@waiting buy milk @pending\n");
+    }
+
+    #[test]
+    fn toggle_removes_from_both_tag_columns() {
+        // 共通規則 3: removal clears the tag wherever it sits.
+        let out = toggle("@waiting buy milk @waiting\n", &[0], Toggle::Waiting, today());
+        assert_eq!(out, "buy milk\n");
+    }
+
+    #[test]
+    fn done_replaces_conflicting_tags_in_both_columns() {
+        // 共通規則 4: conflicting state tags are removed from the leading
+        // column too, then @done is appended at the end.
+        let out = toggle("@waiting buy milk @queue(1)\n", &[0], Toggle::Done, today());
+        assert_eq!(out, "buy milk @done(2024-06-15)\n");
+    }
+
+    #[test]
+    fn toggle_on_tag_only_line_keeps_it_tag_only() {
+        // A tag-only line has the tag; toggling removes it from the leading
+        // column, and adding appends to the (empty) body's trailing column.
+        let out = toggle("@waiting\n", &[0], Toggle::Done, today());
+        assert_eq!(out, "@done(2024-06-15)\n");
+        let out = toggle(out.as_str(), &[0], Toggle::Done, today());
+        assert_eq!(out, "\n");
     }
 
     // ----- 共通規則 4 -----
@@ -378,6 +424,16 @@ mod tests {
         // Toggling a queue OFF triggers the renumber.
         let out = toggle(input, &[0], Toggle::Queue, today());
         assert_eq!(out, "a\nb @queue(1)\nc @queue(2)\nd @queue(2)\n");
+    }
+
+    #[test]
+    fn queue_renumber_covers_leading_column() {
+        // 再採番 rewrites @queue in both tag columns and keeps positions.
+        let input = "@queue(5) a\nb @queue(2)\n";
+        let out = toggle(input, &[1], Toggle::Queue, today());
+        // Removing b's queue leaves {5} -> rank 1; the leading queue stays
+        // at the line start.
+        assert_eq!(out, "@queue(1) a\nb\n");
     }
 
     #[test]

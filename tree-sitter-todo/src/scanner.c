@@ -99,10 +99,16 @@ static bool scan_trailing_tags(TSLexer *lexer)
   return false;
 }
 
-// ":" の後に "TAG*(0 個可) + 行末/EOF" が続くか検証。
+// ":" の後に "TAG*(0 個可) + 行末/EOF" が続くか検証。行末タグ列は空白を
+// 1 つ以上挟んで始まるため、":" の直後に "@" が続く場合は不成立。
 static bool scan_trailing_colon(TSLexer *lexer)
 {
   lexer->advance(lexer, false);
+
+  if (lexer->lookahead == '@')
+  {
+    return false;
+  }
 
   while (true)
   {
@@ -125,11 +131,46 @@ static bool scan_trailing_colon(TSLexer *lexer)
 }
 
 // 本文を走査し、末尾の TAG 連続・trailing colon を取り除いた位置で TEXT 終端を確定。
-// TEXT が空（タグのみの行など）のときは false。
+// TEXT は行頭タグ列（SPEC 行頭タグ列。@name(arg?) の空白区切り連続）を先頭に含み、
+// そこから本文の続きまでを 1 トークンとして返す。行頭タグ列だけで行が終わる
+// （タグだけの行）ときは TEXT を返さず false（内部 lexer の TAG として処理される）。
+// 本文が空のまま `:` や閉じないタグに当たる場合も false。
 static bool scan_text(TSLexer *lexer)
 {
   bool text_end_set = false;
   bool prev_was_space = true;
+
+  // --- 行頭タグ列の読み飛ばし ---
+  while (lexer->lookahead == '@')
+  {
+    if (!scan_one_tag(lexer))
+    {
+      // タグの字面でない（例: `@(`）。`@` を本文の1文字目とする。
+      lexer->advance(lexer, false);
+      lexer->mark_end(lexer);
+      text_end_set = true;
+      prev_was_space = false;
+      break;
+    }
+    if (lexer->lookahead == '\n' || lexer->eof(lexer))
+    {
+      // タグだけの行。TEXT なし。
+      return false;
+    }
+    if (lexer->lookahead != ' ' && lexer->lookahead != '\t')
+    {
+      // タグの直後に非空白（例: `@x(a)y`）。ここまでを本文として扱う。
+      lexer->mark_end(lexer);
+      text_end_set = true;
+      prev_was_space = false;
+      break;
+    }
+    while (lexer->lookahead == ' ' || lexer->lookahead == '\t')
+    {
+      lexer->advance(lexer, false);
+    }
+    // 次が '@' なら行頭タグ列の続き。それ以外なら本文走査へ。
+  }
 
   while (true)
   {

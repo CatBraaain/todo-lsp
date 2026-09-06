@@ -6,7 +6,8 @@
 //! classify a physical line through [`parse_line`]; nothing here talks to the
 //! syntax tree.
 
-/// A `@name` / `@name(arg)` token inside a line's trailing tag column.
+/// A `@name` / `@name(arg)` token inside a line's leading or trailing tag
+/// column.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag {
     pub name: String,
@@ -32,14 +33,13 @@ impl Tag {
 pub enum Kind {
     /// Blank or whitespace-only line: not part of the document structure.
     Blank,
-    /// 見出し行: non-empty body, then `:`, then an optional tag column.
+    /// 見出し行: non-empty body, then `:`, then an optional trailing tag
+    /// column, with an optional leading tag column before the body.
     /// The value is the byte index of the `:`.
     Heading { colon: usize },
-    /// タスク行: body text, then an optional tag column.
+    /// タスク行: an optional leading tag column, a body that may be empty
+    /// (a tag-only line), and an optional trailing tag column.
     Task,
-    /// Non-blank line whose tag column exists but whose body is empty
-    /// (`@done` alone). This is a syntax error per the grammar.
-    TagOnly,
 }
 
 /// The whole-line gray rule that applies to a line, in SPEC.md 適用規則 order
@@ -64,11 +64,14 @@ pub struct LineParts {
     /// The level per SPEC.md's formula (`units / 4`), used when writing
     /// indents (indent / dedent commands).
     pub level: usize,
+    /// The leading tag column (行頭タグ列), in line order. Empty when the
+    /// line starts with body text.
+    pub leading_tags: Vec<Tag>,
     /// Byte range of the trimmed body text — before the `:` for headings,
-    /// before the tag column for tasks. Empty range for blank / tag-only
-    /// lines.
+    /// before the trailing tag column for tasks. Empty range for blank
+    /// lines and tag-only lines.
     pub text_range: (usize, usize),
-    /// The trailing tag column, in line order.
+    /// The trailing tag column (行末タグ列), in line order.
     pub tags: Vec<Tag>,
 }
 
@@ -93,14 +96,15 @@ impl LineParts {
         !matches!(self.kind, Kind::Blank)
     }
 
-    /// The trimmed body text (heading text excludes the `:`).
+    /// The trimmed body text (heading text excludes the `:`). Empty for
+    /// tag-only lines.
     pub fn text<'a>(&self, line: &'a str) -> &'a str {
         &line[self.text_range.0..self.text_range.1]
     }
 
     /// タスクテキスト per SPEC.md: the line minus tags and whitespace, with
     /// runs of whitespace collapsed to single spaces. Heading lines keep
-    /// their trailing `:`.
+    /// their trailing `:`. Empty for tag-only lines.
     pub fn task_text(&self, line: &str) -> String {
         let end = match self.kind {
             Kind::Heading { colon } => colon + 1,
@@ -110,21 +114,26 @@ impl LineParts {
         raw.split_ascii_whitespace().collect::<Vec<_>>().join(" ")
     }
 
-    /// Whether the tag column contains `@name`.
-    pub fn has_tag(&self, name: &str) -> bool {
-        self.tags.iter().any(|t| t.name == name)
+    /// All tags on the line: the leading tag column then the trailing tag
+    /// column, in line order.
+    pub fn all_tags(&self) -> impl Iterator<Item = &Tag> {
+        self.leading_tags.iter().chain(self.tags.iter())
     }
 
-    /// The tag column's first `@name` argument, if any.
+    /// Whether the line has a `@name` tag in either tag column.
+    pub fn has_tag(&self, name: &str) -> bool {
+        self.all_tags().any(|t| t.name == name)
+    }
+
+    /// The first `@name` argument on the line, if any (leading column first).
     pub fn tag_arg(&self, name: &str) -> Option<&str> {
-        self.tags
-            .iter()
+        self.all_tags()
             .find(|t| t.name == name)
             .and_then(|t| t.arg.as_deref())
     }
 
-    /// The 灰色行 rule for this line: `@done` / `@cancelled` / `@hide` in the
-    /// tag column, first match in 適用規則 order.
+    /// The 灰色行 rule for this line: `@done` / `@cancelled` / `@hide` in
+    /// either tag column, first match in 適用規則 order.
     pub fn gray(&self) -> Option<Gray> {
         if self.has_tag("done") {
             Some(Gray::Done)
@@ -144,29 +153,42 @@ impl LineParts {
         self.is_heading() && self.text(line) == "Archive"
     }
 
-    /// Rule 2 of §フォーマット for this line alone: every token (text, `:`,
-    /// tags) separated by single spaces, no leading/trailing whitespace.
-    /// Returns an empty string for blank lines. The caller prepends the
-    /// normalized indent.
+    /// Rule 2 of §フォーマット for this line alone: every token (leading
+    /// tags, text, `:`, trailing tags) separated by single spaces, no
+    /// leading/trailing whitespace. Returns an empty string for blank
+    /// lines. The caller prepends the normalized indent.
     pub fn normalize_body(&self, line: &str) -> String {
-        render(self, line, &self.tags)
+        render(self, line, &self.leading_tags, &self.tags)
     }
 }
 
-/// Render a line's content from its parsed parts and an (edited) tag column:
-/// whitespace-normalized text, `:` for headings, tags joined with single
-/// spaces. Blank lines render as empty strings.
-pub fn render(parts: &LineParts, line: &str, tags: &[Tag]) -> String {
+/// Render a line's content from its parsed parts and (possibly edited) tag
+/// columns: leading tags, whitespace-normalized text, `:` for headings,
+/// trailing tags — each joined with single spaces. Blank lines render as
+/// empty strings.
+pub fn render(parts: &LineParts, line: &str, leading: &[Tag], trailing: &[Tag]) -> String {
     let text = parts
         .text(line)
         .split_ascii_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    let mut out = text;
+    let mut out = String::new();
+    for tag in leading {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&tag.text());
+    }
+    if !text.is_empty() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&text);
+    }
     if parts.is_heading() {
         out.push(':');
     }
-    for tag in tags {
+    for tag in trailing {
         if !out.is_empty() {
             out.push(' ');
         }
@@ -214,6 +236,7 @@ pub fn parse_line(line: &str) -> LineParts {
         indent_len,
         units,
         level,
+        leading_tags: Vec::new(),
         text_range: (indent_len, indent_len),
         tags: Vec::new(),
     };
@@ -221,26 +244,31 @@ pub fn parse_line(line: &str) -> LineParts {
         return blank;
     }
 
-    // The tag column is the line-end suffix of tags (SPEC タグ列). Tags are
-    // parsed backward from the line end so that arguments containing spaces
-    // (`@repeat(0 0 * * *)`) stay intact.
-    let tags = scan_tag_column_backward(line, indent_len);
+    // The leading tag column (行頭タグ列): tags from the line start up to the
+    // first non-tag token. A line the leading column fills entirely is a
+    // tag-only task line with no body and no trailing column.
+    let (leading_tags, content_start) = scan_leading_tags_forward(line, indent_len);
+    if content_start == line.len() {
+        return LineParts {
+            kind: Kind::Task,
+            indent_len,
+            units,
+            level,
+            leading_tags,
+            text_range: (content_start, content_start),
+            tags: Vec::new(),
+        };
+    }
+
+    // The trailing tag column is the line-end suffix of tags (SPEC 行末タグ列).
+    // Tags are parsed backward from the line end so that arguments containing
+    // spaces (`@repeat(0 0 * * *)`) stay intact.
+    let tags = scan_tag_column_backward(line, content_start);
     let body_end = tags
         .first()
         .map(|t| t.start)
         .unwrap_or_else(|| line.trim_end_matches([' ', '\t']).len());
-    let body = &line[indent_len..body_end];
-    if body.trim().is_empty() {
-        // Tag-only line (tags but no body): a syntax error per the grammar.
-        return LineParts {
-            kind: Kind::TagOnly,
-            indent_len,
-            units,
-            level,
-            text_range: (indent_len, indent_len),
-            tags,
-        };
-    }
+    let body = &line[content_start..body_end];
 
     // 見出し行: the body's rightmost `:` with only whitespace after it (up to
     // the tag column) and non-empty text before it. Any earlier `:` sits
@@ -251,14 +279,14 @@ pub fn parse_line(line: &str) -> LineParts {
         .rposition(|b| b == b':')
         .filter(|&i| body[i + 1..].bytes().all(|b| b == b' ' || b == b'\t'))
         .filter(|&i| !body[..i].trim().is_empty())
-        .map(|i| indent_len + i);
+        .map(|i| content_start + i);
     let kind = match colon {
         Some(c) => Kind::Heading { colon: c },
         None => Kind::Task,
     };
     // Heading text excludes the `:`; task text excludes trailing whitespace.
     let text_end = match colon {
-        Some(c) => c - indent_len,
+        Some(c) => c - content_start,
         None => body.trim_end_matches([' ', '\t']).len(),
     };
     LineParts {
@@ -266,8 +294,75 @@ pub fn parse_line(line: &str) -> LineParts {
         indent_len,
         units,
         level,
-        text_range: (indent_len, indent_len + text_end),
+        leading_tags,
+        text_range: (content_start, content_start + text_end),
         tags,
+    }
+}
+
+/// The leading tag column: tags parsed left-to-right from `start`, each
+/// followed by whitespace (or the line end for a tag-only line). Returns the
+/// tags and the byte offset where the body starts.
+fn scan_leading_tags_forward(line: &str, start: usize) -> (Vec<Tag>, usize) {
+    let bytes = line.as_bytes();
+    let mut tags = Vec::new();
+    let mut pos = start;
+    loop {
+        let Some((tag, end)) = parse_tag_starting_at(line, pos) else {
+            break;
+        };
+        // A leading tag must be followed by whitespace or the line end;
+        // `@x(a)y` is not part of the leading column.
+        if end < line.len() && bytes[end] != b' ' && bytes[end] != b'\t' {
+            break;
+        }
+        tags.push(tag);
+        pos = end;
+        while pos < line.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+            pos += 1;
+        }
+        if pos == line.len() {
+            break;
+        }
+    }
+    (tags, pos)
+}
+
+/// Parse one tag starting exactly at byte `start`: `@name` or `@name(arg)`.
+/// `name` is 1+ chars without whitespace or `(`; the argument may contain
+/// whitespace but no `)` and must close before the line ends. Returns the tag
+/// and the byte offset just past it.
+fn parse_tag_starting_at(line: &str, start: usize) -> Option<(Tag, usize)> {
+    let bytes = line.as_bytes();
+    if bytes.get(start) != Some(&b'@') {
+        return None;
+    }
+    let mut i = start + 1;
+    while i < line.len() && bytes[i] != b' ' && bytes[i] != b'\t' && bytes[i] != b'(' {
+        i += 1;
+    }
+    if i == start + 1 {
+        return None; // empty name
+    }
+    let name = line[start + 1..i].to_string();
+    if bytes.get(i) == Some(&b'(') {
+        let close = bytes[i + 1..].iter().position(|&b| b == b')')?;
+        let arg_end = i + 1 + close;
+        let tag = Tag {
+            name,
+            arg: Some(line[i + 1..arg_end].to_string()),
+            start,
+            end: arg_end + 1,
+        };
+        Some((tag, arg_end + 1))
+    } else {
+        let tag = Tag {
+            name,
+            arg: None,
+            start,
+            end: i,
+        };
+        Some((tag, i))
     }
 }
 
@@ -298,17 +393,15 @@ fn scan_tag_column_backward(line: &str, content_start: usize) -> Vec<Tag> {
 /// `@name(arg)`: `name` is 1+ chars without whitespace or `(` (a `)` or `@`
 /// inside the name is fine), the argument may be empty and contain
 /// whitespace but no `)`. The tag must start at `content_start` or after
-/// whitespace / the heading `:`.
+/// whitespace — the trailing column begins after a space, so a tag glued to
+/// the heading `:` (`Foo:@tag`) is body text.
 fn parse_tag_ending_at(line: &str, end: usize, content_start: usize) -> Option<Tag> {
     let bytes = line.as_bytes();
     if end <= content_start {
         return None;
     }
     let boundary_ok = |start: usize| {
-        start == content_start
-            || bytes[start - 1] == b' '
-            || bytes[start - 1] == b'\t'
-            || bytes[start - 1] == b':' // `heading:@tag` needs no space
+        start == content_start || bytes[start - 1] == b' ' || bytes[start - 1] == b'\t'
     };
     if bytes[end - 1] == b')' {
         // Arg-carrying tag. `(` candidates are tried right-to-left because an
@@ -429,11 +522,23 @@ mod tests {
     }
 
     #[test]
-    fn tag_only_line_is_tag_only() {
+    fn tag_only_line_is_a_task_with_no_body() {
         let p = parts("@done");
-        assert_eq!(p.kind, Kind::TagOnly);
-        assert_eq!(tag_names("@done"), ["done"]);
+        assert_eq!(p.kind, Kind::Task);
+        assert!(p.leading_tags.iter().map(|t| t.name.clone()).eq(["done".to_string()]));
+        assert!(p.tags.is_empty());
+        assert_eq!(p.text("@done"), "");
+        assert_eq!(p.task_text("@done"), "");
         assert_eq!(p.gray(), Some(Gray::Done));
+    }
+
+    #[test]
+    fn multiple_tag_only_line() {
+        let p = parts("@done @waiting");
+        assert_eq!(p.kind, Kind::Task);
+        assert_eq!(p.leading_tags.len(), 2);
+        assert!(p.tags.is_empty());
+        assert_eq!(p.text("@done @waiting"), "");
     }
 
     #[test]
@@ -533,6 +638,24 @@ mod tests {
     }
 
     #[test]
+    fn tag_glued_to_heading_colon_is_body_text() {
+        // SPEC 行末タグ列: the trailing column starts after at least one
+        // space. `Foo:@tag` has no space, so it is a plain task line — the
+        // same rule as `time is 12:30`.
+        let line = "Foo:@tag";
+        let p = parts(line);
+        assert_eq!(p.kind, Kind::Task);
+        assert!(p.tags.is_empty());
+        assert_eq!(p.text(line), "Foo:@tag");
+        // With a space it is a heading plus its trailing tag column.
+        let line = "Foo: @tag";
+        let p = parts(line);
+        assert_eq!(p.kind, Kind::Heading { colon: 3 });
+        assert_eq!(p.text(line), "Foo");
+        assert!(p.tags.iter().map(|t| t.name.clone()).eq(["tag".to_string()]));
+    }
+
+    #[test]
     fn heading_text_may_contain_colons() {
         // The rightmost colon with a valid tag-column suffix wins.
         let line = "a:b: @x";
@@ -612,5 +735,72 @@ mod tests {
         assert_eq!(parts("").normalize_body(""), "");
         assert_eq!(parts("  ").normalize_body("  "), "");
         assert_eq!(parts("  @done").normalize_body("  @done"), "@done");
+        assert_eq!(parts("@done  @waiting").normalize_body("@done  @waiting"), "@done @waiting");
+    }
+
+    // ----- leading tag column -----
+
+    #[test]
+    fn leading_tag_column_before_body() {
+        let line = "@done buy milk";
+        let p = parts(line);
+        assert_eq!(p.kind, Kind::Task);
+        assert_eq!(p.leading_tags.len(), 1);
+        assert_eq!(p.leading_tags[0].name, "done");
+        assert_eq!(p.text(line), "buy milk");
+        assert!(p.tags.is_empty());
+        assert_eq!(p.gray(), Some(Gray::Done));
+    }
+
+    #[test]
+    fn leading_and_trailing_tag_columns() {
+        let line = "@done @waiting buy milk @queue(1)";
+        let p = parts(line);
+        assert_eq!(p.kind, Kind::Task);
+        assert_eq!(p.leading_tags.len(), 2);
+        assert!(p.tags.iter().map(|t| t.name.clone()).eq(["queue".to_string()]));
+        assert_eq!(p.text(line), "buy milk");
+        assert_eq!(p.gray(), Some(Gray::Done));
+        assert_eq!(p.tag_arg("queue"), Some("1"));
+    }
+
+    #[test]
+    fn leading_tag_column_on_heading() {
+        let line = "@done Project: @queue(1)";
+        let p = parts(line);
+        assert_eq!(p.kind, Kind::Heading { colon: 13 });
+        assert_eq!(p.leading_tags.len(), 1);
+        assert_eq!(p.text(line), "Project");
+        assert!(p.tags.iter().map(|t| t.name.clone()).eq(["queue".to_string()]));
+        assert_eq!(p.gray(), Some(Gray::Done));
+    }
+
+    #[test]
+    fn leading_tag_with_unclosed_argument_is_body() {
+        // SPEC タグの構文: an unclosed argument makes it body text.
+        let line = "@done( buy milk";
+        let p = parts(line);
+        assert_eq!(p.kind, Kind::Task);
+        assert!(p.leading_tags.is_empty());
+        assert!(p.tags.is_empty());
+        assert_eq!(p.text(line), "@done( buy milk");
+    }
+
+    #[test]
+    fn leading_tag_followed_by_non_space_is_body() {
+        // `@x(a)y` — the tag-like token is not whitespace-separated, so the
+        // whole prefix is body text.
+        let line = "@x(a)y buy";
+        let p = parts(line);
+        assert_eq!(p.kind, Kind::Task);
+        assert!(p.leading_tags.is_empty());
+        assert_eq!(p.text(line), "@x(a)y buy");
+    }
+
+    #[test]
+    fn leading_tag_render_keeps_position() {
+        let line = "@done   buy  milk   @queue(1)";
+        let p = parts(line);
+        assert_eq!(p.normalize_body(line), "@done buy milk @queue(1)");
     }
 }
