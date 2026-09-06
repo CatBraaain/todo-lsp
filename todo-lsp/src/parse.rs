@@ -103,19 +103,18 @@ mod tests {
     }
 
     #[test]
-    fn colon_only_line_is_a_task_line() {
-        // A textless `:` used to be an unrecoverable error; per SPEC タスク,
-        // a `:` at the body start is body text, so the line parses cleanly
-        // as a task line.
+    fn colon_only_line_is_a_heading_line() {
+        // SPEC 見出し: `:` で終わる行は本文が空でも見出し。外部 scanner は
+        // TEXT を返さず、内部 lexer の colon トークンで heading_line が成立する。
         assert!(!has_error(":"));
-        assert_eq!(first_named_child_kind(":").as_deref(), Some("task_line"));
+        assert_eq!(first_named_child_kind(":").as_deref(), Some("heading_block"));
     }
 
     #[test]
     fn colon_initial_lines_parse() {
-        // `: @done` — body `:` plus a trailing tag column.
+        // `: @done` — a heading with an empty body and a trailing tag column.
         assert!(!has_error(": @done"));
-        assert_eq!(first_named_child_kind(": @done").as_deref(), Some("task_line"));
+        assert_eq!(first_named_child_kind(": @done").as_deref(), Some("heading_block"));
         // `:foo:` — body `:foo` ends at the rightmost colon: a heading.
         let input = ":foo:\n  task\n";
         assert!(!has_error(input));

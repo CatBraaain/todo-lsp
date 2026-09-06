@@ -128,28 +128,30 @@ Unclosed tag argument is body text
     (text)))
 
 ===
-Header without text is a task line
+Header without text is a heading line
 ===
 
 :
 ---
 
 (source_file
-  (task_line
-    (text)))
+  (heading_block
+    (heading_line
+      (colon))))
 
 ===
-Header with only a tag is a task line
+Header with only a tag is a heading line
 ===
 
 : @done
 ---
 
 (source_file
-  (task_line
-    (text)
-    (tag
-      (name))))
+  (heading_block
+    (heading_line
+      (colon)
+      (tag
+        (name)))))
 
 ===
 Tag glued to the heading colon is body text
@@ -214,7 +216,7 @@ task @time(12:30)
       (arg))))
 
 ===
-Colon-initial body is a task line
+Colon-only lines are heading lines
 ===
 
 :
@@ -222,8 +224,8 @@ Colon-initial body is a task line
 ---
 
 (source_file
-  (task_line (text))
-  (task_line (text) (tag (name)))
+  (heading_block (heading_line (colon)))
+  (heading_block (heading_line (colon) (tag (name))))
 )
 
 ===
@@ -249,6 +251,24 @@ Heading leading tag tokens are body text
 ===
 
 @done Project:
+  task
+---
+
+(source_file
+  (heading_block
+    (heading_line (text) (colon))
+    (indent)
+    (task_block
+      (task_line (text)))
+    (dedent)
+  )
+)
+
+===
+Heading with leading tag column and empty body
+===
+
+@done :
   task
 ---
 

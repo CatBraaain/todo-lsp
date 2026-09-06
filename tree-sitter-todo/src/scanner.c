@@ -140,6 +140,7 @@ static bool scan_text(TSLexer *lexer)
 {
   bool text_end_set = false;
   bool prev_was_space = true;
+  bool leading_tags_consumed = false;
 
   // --- 行頭タグ列の読み飛ばし ---
   while (lexer->lookahead == '@')
@@ -170,6 +171,7 @@ static bool scan_text(TSLexer *lexer)
     {
       lexer->advance(lexer, false);
     }
+    leading_tags_consumed = true;
     // 次が '@' なら行頭タグ列の続き。それ以外なら本文走査へ。
   }
 
@@ -207,21 +209,30 @@ static bool scan_text(TSLexer *lexer)
 
     if (lexer->lookahead == ':')
     {
-      if (!text_end_set)
-      {
-        // 本文の1文字目のコロン（SPEC タスク: `:` で始まる行はタスク行）。
-        // 本文として消費し、走査を続ける。2つ目以降のコロンが trailing
-        // colon 要件を満たせば、そこで見出しになる。
-        lexer->advance(lexer, false);
-        lexer->mark_end(lexer);
-        text_end_set = true;
-        prev_was_space = false;
-        continue;
-      }
+      // SPEC 見出し: `:` または `:` と行末タグ列で終わる行は見出し。`:` の
+      // 直前で mark_end を固定してから trailing colon を検証する（成立後に
+      // scan_trailing_colon が `:` を消費済みのため、そこで mark_end すると
+      // TEXT が `:` を含んでしまう）。成立したら、本文（text_end_set）が
+      // あれば mark_end 位置までの TEXT、行頭タグ列だけがあるならタグ列を
+      // 本文とした TEXT（見出し行の行頭タグ字面は本文）を返す。どちらも
+      // なければ TEXT なしで false を返し、`:` を内部 lexer の colon に委ねて
+      // 本文のない見出しとして扱う。
+      lexer->mark_end(lexer);
       if (scan_trailing_colon(lexer))
       {
-        return text_end_set;
+        if (text_end_set)
+        {
+          return true;
+        }
+        if (leading_tags_consumed)
+        {
+          return true;
+        }
+        return false;
       }
+      // 不成立のコロンは本文として扱う（例: `:foo`、`a: b` の 1 つ目の `:`）。
+      // scan_trailing_colon は `:` と後続の空白まで読み進めているため、現在
+      // 位置で mark_end し直してそこまでを本文に含める。
       lexer->mark_end(lexer);
       text_end_set = true;
       prev_was_space = false;

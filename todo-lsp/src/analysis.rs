@@ -652,6 +652,8 @@ fn classify_line(
         None => {}
     }
     // 適用規則 5: 見出し行 — content + symbol + the tag column; no stylings.
+    // SPEC 表示: the `:` is bold and the trailing tag column is shown even
+    // when the body is empty (SPEC 見出し: `:` で終わる行は本文が空でも見出し).
     if let Some(colon) = parts.colon() {
         let (text_start, text_end) = parts.text_range;
         for tag in &parts.leading_tags {
@@ -665,10 +667,10 @@ fn classify_line(
                 tt::TODO_HEADING_CONTENT,
                 0,
             ));
-            raw.push((line_idx, colon as u32, 1, tt::TODO_HEADING_SYMBOL, 0));
-            for tag in &parts.tags {
-                push_tag_token(tag, line_idx, now, raw);
-            }
+        }
+        raw.push((line_idx, colon as u32, 1, tt::TODO_HEADING_SYMBOL, 0));
+        for tag in &parts.tags {
+            push_tag_token(tag, line_idx, now, raw);
         }
         return;
     }
@@ -1036,12 +1038,12 @@ Archive:
     }
 
     #[test]
-    fn symbols_heading_without_text_is_a_task_symbol() {
-        // SPEC タスク: `:` で始まる行はタスク行（本文 `:`）で、アウトライン
-        // にも本文どおりのシンボルが出る。
+    fn symbols_colon_only_line_is_a_heading_symbol() {
+        // SPEC 見出し: `:` で終わる行は本文が空でも見出し。アウトライン表示名は
+        // `:` の前の本文（空）になる。
         let s = symbols_of(":\n");
-        assert_eq!(top_names(&s), [":"]);
-        assert_eq!(s[0].kind, SymbolKind::STRING);
+        assert_eq!(top_names(&s), [""]);
+        assert_eq!(s[0].kind, SymbolKind::MODULE);
     }
 
     #[test]
@@ -1488,10 +1490,11 @@ Archive:
     }
 
     #[test]
-    fn semantic_tokens_colon_only_task_line_is_empty() {
-        // `:` は本文1文字のタスク行で、灰色行でも装飾対象でもないため、
-        // token を出さない（SPEC §表示）。
-        assert!(semantic_tokens_of(":\n").is_empty());
+    fn semantic_tokens_colon_only_heading_bold_symbol() {
+        // SPEC 見出し: `:` で終わる行は本文が空でも見出し。`:` は太字で
+        // 表示される（SPEC §表示: 見出しの `:`）。
+        let abs = abs_positions(&semantic_tokens_of(":\n"));
+        assert_eq!(abs, [(0, 0, 1, tt::TODO_HEADING_SYMBOL, 0)]);
     }
 
     #[test]

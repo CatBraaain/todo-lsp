@@ -272,14 +272,14 @@ pub fn parse_line(line: &str) -> LineParts {
     let body = &line[content_start..body_end];
 
     // 見出し行: the body's rightmost `:` with only whitespace after it (up to
-    // the tag column) and non-empty text before it. Any earlier `:` sits
-    // inside the body text, so only the rightmost colon can qualify — this
-    // mirrors the external scanner, where the last valid colon wins.
+    // the tag column). Any earlier `:` sits inside the body text, so only the
+    // rightmost colon can qualify — this mirrors the external scanner, where
+    // the last valid colon wins. The text before the `:` may be empty (SPEC
+    // 見出し: `:` で終わる行は本文が空でも見出し).
     let colon = body
         .bytes()
         .rposition(|b| b == b':')
         .filter(|&i| body[i + 1..].bytes().all(|b| b == b' ' || b == b'\t'))
-        .filter(|&i| !body[..i].trim().is_empty())
         .map(|i| content_start + i);
     let kind = match colon {
         Some(c) => Kind::Heading { colon: c },
@@ -673,15 +673,15 @@ mod tests {
     }
 
     #[test]
-    fn colon_without_text_is_not_heading() {
-        // A `:` at the line start is body text (SPEC 見出し行 requires a
-        // non-empty body before the `:`), so these are task lines.
+    fn colon_without_text_is_a_heading() {
+        // SPEC 見出し: `:` または `:` と行末タグ列で終わる行は、本文が空でも
+        // 見出し。本文テキストは空になる。
         let p = parts(":");
-        assert_eq!(p.kind, Kind::Task);
-        assert_eq!(p.text_range, (0, 1));
+        assert_eq!(p.kind, Kind::Heading { colon: 0 });
+        assert_eq!(p.text_range, (0, 0));
         let p = parts(": @done");
-        assert_eq!(p.kind, Kind::Task);
-        assert_eq!(p.text(": @done"), ":");
+        assert_eq!(p.kind, Kind::Heading { colon: 0 });
+        assert_eq!(p.text_range, (0, 0));
         assert_eq!(tag_names(": @done"), ["done"]);
     }
 

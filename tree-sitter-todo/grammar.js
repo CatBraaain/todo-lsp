@@ -16,7 +16,7 @@ export default grammar({
       seq($.heading_line, optional(seq($.indent, $.task_block, $.dedent))),
 
     heading_line: ($) =>
-      prec(1, prec.left(seq(field("text", $.text), $.colon, repeat($.tag), $._newline))),
+      prec(1, prec.left(seq(optional(field("text", $.text)), $.colon, repeat($.tag), $._newline))),
 
     colon: () => ":",
 
