@@ -24,6 +24,9 @@ struct TokenResult {
 pub struct Backend {
     client: Client,
     documents: Mutex<DocumentStore>,
+    /// §リピート重複抑制: serializes `executeCommand` handling so racing
+    /// auto-repeat runs compute from the post-edit document.
+    command_lock: tokio::sync::Mutex<()>,
     /// §表示 色付けの更新: the client advertised
     /// `workspace.semanticTokens.refreshSupport` in `initialize`.
     refresh_supported: AtomicBool,
@@ -40,6 +43,7 @@ impl Backend {
         Self {
             client,
             documents: Mutex::new(DocumentStore::new()),
+            command_lock: tokio::sync::Mutex::new(()),
             refresh_supported: AtomicBool::new(false),
             pending_refresh: AtomicBool::new(false),
             token_results: Mutex::new(HashMap::new()),
@@ -298,6 +302,11 @@ impl LanguageServer for Backend {
     /// line numbers. The result is applied as line-limited workspace edits:
     /// each edit covers only lines whose content changes.
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<LSPAny>> {
+        // §リピート重複抑制: auto-repeat triggers (startup, editor switch,
+        // minute boundary) can overlap and race ahead of the first edit's
+        // didChange, so commands are serialized per server and the applied
+        // text is recorded below before the guard is released.
+        let _guard = self.command_lock.lock().await;
         let Some(uri_str) = params.arguments.first().and_then(|v| v.as_str()) else {
             return Ok(None);
         };
@@ -364,7 +373,7 @@ impl LanguageServer for Backend {
                 let edits = line_edits(&old_text, &new_text);
                 if !edits.is_empty() {
                     let edit = WorkspaceEdit {
-                        changes: Some([(uri, edits)].into_iter().collect()),
+                        changes: Some([(uri.clone(), edits)].into_iter().collect()),
                         ..Default::default()
                     };
                     let response = self
@@ -376,6 +385,14 @@ impl LanguageServer for Backend {
                     // and that didChange sends exactly one recalculation.
                     if response.applied {
                         self.pending_refresh.store(true, Ordering::SeqCst);
+                        // Record the applied text now (didChange follows, but
+                        // a serialized racing command must not recompute from
+                        // the pre-edit document and apply the same edit twice).
+                        let mut documents = self.documents.lock().unwrap();
+                        if let Some(document) = documents.get_mut(&uri) {
+                            document.text = new_text.clone();
+                            document.tree = parse(&new_text);
+                        }
                     }
                 }
             }

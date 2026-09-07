@@ -26,6 +26,8 @@ mod harness {
         next_id: i64,
         /// Params of the last `workspace/applyEdit` request the server sent.
         pub last_apply_edit: Option<Value>,
+        /// Number of `workspace/applyEdit` requests received.
+        pub apply_edit_count: usize,
         /// Number of `workspace/semanticTokens/refresh` requests received.
         pub refresh_count: usize,
     }
@@ -70,6 +72,7 @@ mod harness {
                 rx,
                 next_id: 1,
                 last_apply_edit: None,
+                apply_edit_count: 0,
                 refresh_count: 0,
             }
         }
@@ -148,6 +151,7 @@ mod harness {
             match method {
                 Some("workspace/applyEdit") => {
                     self.last_apply_edit = msg.get("params").cloned();
+                    self.apply_edit_count += 1;
                 }
                 Some("workspace/semanticTokens/refresh") => {
                     self.refresh_count += 1;
@@ -1141,6 +1145,62 @@ fn no_refresh_without_client_support() {
     let _ = s.await_notification("textDocument/publishDiagnostics");
     s.assert_no_refresh_for(Duration::from_millis(300));
     assert_eq!(s.refresh_count, 0);
+
+    s.shutdown_and_exit();
+}
+
+/// §リピート重複抑制: two overlapping `repeatTasks` commands (the auto
+/// repeat triggers — startup, editor switch, minute boundary — can fire
+/// before the first edit's didChange has arrived) must produce a single
+/// applyEdit, not one per racing command.
+#[test]
+fn execute_command_overlapping_repeat_tasks_applies_edit_once() {
+    let mut s = LspSession::spawn();
+    let init_id = s.send_request(
+        "initialize",
+        json!({ "processId": null, "rootUri": null, "capabilities": {} }),
+    );
+    let _ = s.await_response(init_id);
+    s.send_notification("initialized", json!({}));
+
+    s.send_notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": SAMPLE_URI,
+                "languageId": "todo",
+                "version": 1,
+                "text": "task @repeat(0 0 * * *)\n",
+            }
+        }),
+    );
+    let _ = s.await_notification("textDocument/publishDiagnostics");
+
+    // Fire both commands before awaiting either response and without
+    // sending the didChange in between — the racing-callbacks situation.
+    let id1 = s.send_request(
+        "workspace/executeCommand",
+        json!({
+            "command": "todo-language.repeatTasks",
+            "arguments": [SAMPLE_URI],
+        }),
+    );
+    let id2 = s.send_request(
+        "workspace/executeCommand",
+        json!({
+            "command": "todo-language.repeatTasks",
+            "arguments": [SAMPLE_URI],
+        }),
+    );
+    let r1 = s.await_response(id1);
+    let r2 = s.await_response(id2);
+    assert!(r1.get("result").is_some(), "command must not error: {r1}");
+    assert!(r2.get("result").is_some(), "command must not error: {r2}");
+
+    assert_eq!(
+        s.apply_edit_count, 1,
+        "overlapping repeatTasks must apply the edit exactly once"
+    );
 
     s.shutdown_and_exit();
 }

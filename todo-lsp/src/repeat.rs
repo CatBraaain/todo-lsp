@@ -73,8 +73,15 @@ fn process_definition(lines: &mut Vec<String>, def: &str, now: DateTime<Utc>) {
     let Ok(cron) = Cron::from_str(cron_arg.trim()) else {
         return;
     };
-    // 手順 2: cron式の現在より前の直近の日時.
-    let Ok(prev) = cron.find_previous_occurrence(&now, false) else {
+    // 手順 2: cron式の現在より前の直近の日時. Cron occurrences are
+    // minute-granular; drop sub-minute fields so the rendered @start parses
+    // back equal to prev on the next run (otherwise duplicate suppression
+    // never matches and the task is re-added on every run).
+    let Some(prev) = cron
+        .find_previous_occurrence(&now, false)
+        .ok()
+        .and_then(|t| t.with_second(0).and_then(|t| t.with_nanosecond(0)))
+    else {
         return;
     };
 
@@ -110,13 +117,13 @@ fn process_definition(lines: &mut Vec<String>, def: &str, now: DateTime<Utc>) {
         }
     }
 
-    // 手順 6: skip when the destination already has the same task name with
-    // the same @start.
-    let nodes = build_nodes(lines);
-    let already_there = children(lines, container).into_iter().any(|child| {
-        let text = &lines[nodes[child].line_idx];
-        let p = line::parse_line(text);
-        p.task_text(text) == name && p.tag_arg("start").and_then(parse_date) == Some(prev)
+    // 手順 6: skip when the document already has the same task name with
+    // the same @start — anywhere, not only under the container. A racing
+    // auto-repeat run can have applied the same edit twice, leaving the
+    // generated line outside the container's direct children.
+    let already_there = lines.iter().any(|l| {
+        let p = line::parse_line(l);
+        p.task_text(l) == name && p.tag_arg("start").and_then(parse_date) == Some(prev)
     });
     if already_there {
         return;
@@ -339,6 +346,60 @@ mod tests {
         // block is not at the document head.
         let input = "intro\n\nInbox:\n    buy milk @start(2024-06-15)\n\nInbox/buy milk @repeat(0 0 * * *)\n";
         assert_eq!(repeat_tasks(input, now()), input);
+    }
+
+    #[test]
+    fn subsecond_now_does_not_break_duplicate_suppression() {
+        // Real Utc::now() carries nanoseconds; cron's prev must not inherit
+        // them or the rendered @start never parses back equal.
+        let now = NaiveDate::from_ymd_opt(2024, 6, 15)
+            .unwrap()
+            .and_hms_nano_opt(12, 0, 0, 500_000_000)
+            .unwrap()
+            .and_utc();
+        let once = repeat_tasks("task @repeat(0 0 * * *)\n", now);
+        let twice = repeat_tasks(&once, now);
+        assert_eq!(once, twice, "once: {once:?}");
+    }
+
+    #[test]
+    fn repeat_tasks_is_idempotent_across_inputs() {
+        let inputs = vec![
+            "a @repeat(0 0 * * *)\n",
+            "A:\n    a\nA/a @repeat(0 0 * * *)\n",
+            "A/a @repeat(0 0 * * *)\n",
+            "A/B/a @repeat(0 0 * * *)\n",
+            "A:\n    a @start(2024-06-15)\nA/a @repeat(0 0 * * *)\n",
+            "intro\nA:\n    a\nA/a @repeat(0 0 * * *)\n",
+            "A:\n    B:\n        a\nA/B/a @repeat(0 0 * * *)\n",
+            "a @repeat(0 9 * * *)\n",
+            "A:/a @repeat(0 0 * * *)\n",
+            "A:\n\nA/a @repeat(0 0 * * *)\n",
+            "@repeat(0 0 * * *) a\n",
+            "A:\n    a\nB:\n    b\nA/a @repeat(0 0 * * *)\nB/b @repeat(0 0 * * *)\n",
+            "a/b @repeat(0 0 * * *)\nb/c @repeat(0 0 * * *)\n",
+            "A:\n    B\nA/B/c @repeat(0 0 * * *)\n",
+            "x\nA/a @repeat(0 0 * * *)\ny\n",
+        ];
+        for input in inputs {
+            let once = repeat_tasks(input, now());
+            let twice = repeat_tasks(&once, now());
+            assert_eq!(once, twice, "input: {input:?}\nonce: {once:?}");
+        }
+    }
+
+    #[test]
+    fn duplicate_outside_destination_is_suppressed() {
+        // 手順 6 checks the whole document: a generated line that ended up
+        // outside the destination (racing auto-repeat runs, later edits)
+        // still suppresses re-adding the same name with the same @start.
+        let input =
+            "Elsewhere:\n    buy milk @start(2024-06-15)\nInbox/buy milk @repeat(0 0 * * *)\n";
+        let out = repeat_tasks(input, now());
+        assert_eq!(
+            out,
+            "Elsewhere:\n    buy milk @start(2024-06-15)\n\nInbox/buy milk @repeat(0 0 * * *)\n"
+        );
     }
 
     #[test]
