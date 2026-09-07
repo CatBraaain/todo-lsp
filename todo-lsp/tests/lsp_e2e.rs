@@ -504,13 +504,8 @@ fn folding_range_returns_gray_ranges_as_comments() {
     );
     let resp = s.await_response(id);
     let folds = resp["result"].as_array().expect("folds array");
-    assert_eq!(folds.len(), 4, "Project and Archive with their comments");
-    let expected = [
-        (0, 2, "comment"),
-        (1, 2, "comment"),
-        (4, 6, "comment"),
-        (5, 6, "comment"),
-    ];
+    assert_eq!(folds.len(), 2, "one comment fold per heading-owned run");
+    let expected = [(0, 2, "comment"), (4, 6, "comment")];
     for (fold, (start_line, end_line, kind)) in folds.iter().zip(expected) {
         assert_eq!(fold["startLine"].as_i64(), Some(start_line));
         assert_eq!(fold["endLine"].as_i64(), Some(end_line));

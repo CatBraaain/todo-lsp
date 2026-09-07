@@ -121,9 +121,10 @@ fn make_symbol(
     }
 }
 
-/// Build heading and gray-block folding ranges. A heading with a leading gray
-/// child run becomes a comment range; a `source_file` or `task_block`
-/// contributes one comment range for its leading run of gray child blocks.
+/// Build heading and gray-block folding ranges. A gray-run fold spans the
+/// heading row owning the run — or the first gray line for the document
+/// root — through the run's last gray line; trailing blank lines stay
+/// outside the fold.
 pub fn folding_ranges(root: Node, source: &[u8]) -> Vec<FoldingRange> {
     let tones = line_tones(source);
     let mut out = Vec::new();
@@ -167,7 +168,7 @@ fn line_tones(source: &[u8]) -> Vec<LineTone> {
 }
 
 fn collect_folding_ranges(node: Node, tones: &[LineTone], out: &mut Vec<FoldingRange>) {
-    if matches!(node.kind(), "source_file" | "task_block") {
+    if node.kind() == "source_file" {
         if let Some(range) = leading_gray_children_range(&node, tones) {
             out.push(range);
         }
@@ -181,6 +182,9 @@ fn collect_folding_ranges(node: Node, tones: &[LineTone], out: &mut Vec<FoldingR
                 }
                 collect_folding_ranges(child, tones, out);
             }
+            // Only headings own a child block in this grammar; recurse to
+            // find nested headings. A task_block's own gray run starts at its
+            // heading row and is already emitted by folding_range_for_heading.
             "task_block" => collect_folding_ranges(child, tones, out),
             _ => {}
         }
@@ -199,17 +203,19 @@ fn folding_range_for_heading(node: &Node, tones: &[LineTone]) -> Option<FoldingR
     }
     let heading_line = heading_line?;
     let task_block = task_block?;
-    let start_line = heading_line.start_position().row as u32;
 
+    // A gray run under the heading folds from the heading row through the
+    // run's last gray line, replacing the heading's region fold.
     if let Some((_, end_line)) = leading_gray_children_bounds(&task_block, tones) {
         return Some(FoldingRange {
-            start_line,
+            start_line: heading_line.start_position().row as u32,
             end_line,
             kind: Some(FoldingRangeKind::Comment),
             ..Default::default()
         });
     }
 
+    let start_line = heading_line.start_position().row as u32;
     let end_line = last_line_of_block(node)? as u32;
     if end_line <= start_line {
         return None;
@@ -252,8 +258,21 @@ fn leading_gray_children_bounds(node: &Node, tones: &[LineTone]) -> Option<(u32,
 
     Some((
         first.start_position().row as u32,
-        last_line_of_block(last)? as u32,
+        last_gray_line_of_block(last, tones) as u32,
     ))
+}
+
+/// The last gray line of a gray block: trailing blank lines swallowed by the
+/// final `_newline` run are excluded, so a gray fold never covers the blank
+/// run that follows it. A gray block always holds at least one non-blank
+/// line, so the search cannot fail.
+fn last_gray_line_of_block(node: &Node, tones: &[LineTone]) -> usize {
+    let start = node.start_position().row;
+    let end = last_line_of_block(node).unwrap_or(start);
+    (start..=end)
+        .rev()
+        .find(|&line| !matches!(tones.get(line), Some(LineTone::Blank)))
+        .unwrap_or(end)
 }
 
 fn is_gray_block(node: &Node, tones: &[LineTone]) -> bool {
@@ -1157,14 +1176,29 @@ Archive:
 
     #[test]
     fn fold_leading_gray_children_replaces_heading_region_with_comment() {
+        // The run folds from its owning heading row: one comment fold.
         let r = folds_of("Project:\n  a @done\n  b @cancelled\n  c\n");
-        assert_eq!(r.len(), 2);
+        assert_eq!(r.len(), 1);
         assert_eq!(r[0].start_line, 0);
         assert_eq!(r[0].end_line, 2);
         assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
-        assert_eq!(r[1].start_line, 1);
-        assert_eq!(r[1].end_line, 2);
-        assert_eq!(r[1].kind, Some(FoldingRangeKind::Comment));
+    }
+
+    #[test]
+    fn fold_gray_run_excludes_trailing_blank_lines() {
+        // The fold ends at the last gray line; the blank run that follows
+        // stays visible. Heading-owned and document-level runs alike.
+        let r = folds_of("Archive:\n  a @done\n  b @done\n\n  c\n");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 2);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
+
+        let r = folds_of("x @done\ny @done\n\nz\n");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].start_line, 0);
+        assert_eq!(r[0].end_line, 1);
+        assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
     }
 
     #[test]
@@ -1209,29 +1243,27 @@ Archive:
 
     #[test]
     fn fold_all_gray_heading_and_children_as_nested_comments() {
+        // The run spans the heading row through the last gray line of the
+        // block.
         let r = folds_of("Archive:\n  old @done\n  old2 @hide\n");
-        assert_eq!(r.len(), 2);
+        assert_eq!(r.len(), 1);
         assert_eq!(r[0].start_line, 0);
         assert_eq!(r[0].end_line, 2);
         assert_eq!(r[0].kind, Some(FoldingRangeKind::Comment));
-        assert_eq!(r[1].start_line, 1);
-        assert_eq!(r[1].end_line, 2);
-        assert_eq!(r[1].kind, Some(FoldingRangeKind::Comment));
     }
 
     #[test]
     fn fold_nested_comment_ranges_do_not_partially_overlap() {
+        // Inner's run folds from its heading row, so only one comment fold
+        // sits inside Outer's region.
         let r = folds_of("Outer:\n  a\n  Inner:\n    x @done\n    y @done\n  z\n");
-        assert_eq!(r.len(), 3);
+        assert_eq!(r.len(), 2);
         assert_eq!(r[0].start_line, 0);
         assert_eq!(r[0].end_line, 5);
         assert_eq!(r[0].kind, Some(FoldingRangeKind::Region));
         assert_eq!(r[1].start_line, 2);
         assert_eq!(r[1].end_line, 4);
         assert_eq!(r[1].kind, Some(FoldingRangeKind::Comment));
-        assert_eq!(r[2].start_line, 3);
-        assert_eq!(r[2].end_line, 4);
-        assert_eq!(r[2].kind, Some(FoldingRangeKind::Comment));
     }
 
     #[test]
