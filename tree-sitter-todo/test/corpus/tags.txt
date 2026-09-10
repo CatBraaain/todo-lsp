@@ -109,3 +109,14 @@ task @ref(@other)
 (source_file
   (task_line (text) (tag (name) (arg)))
 )
+
+===
+Colon in tag name
+===
+
+task @done:
+---
+
+(source_file
+  (task_line (text) (tag (name)))
+)

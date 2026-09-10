@@ -7,10 +7,6 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { COMMAND_SPECS } from "../src/commandSpecs.mjs";
-import {
-  platformDirectoryName,
-  serverBinaryName,
-} from "../src/platform.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(root, "..", "package.json"), "utf8"));
@@ -137,18 +133,11 @@ test("設定: todo-language.repeatTask.autoRepeat contributed, default true", ()
   assert.equal(property.default, true);
 });
 
-test("利用環境: supported platforms resolve their binary directory and name", () => {
-  assert.equal(platformDirectoryName("win32", "x64"), "win32-x64");
-  assert.equal(platformDirectoryName("linux", "x64"), "linux-x64");
-  assert.equal(serverBinaryName("win32"), "todo-lsp.exe");
-  assert.equal(serverBinaryName("linux"), "todo-lsp");
-});
-
-test("利用環境: unsupported platforms fail with the spec error message", () => {
-  assert.throws(
-    () => platformDirectoryName("darwin", "arm64"),
-    /^Error: todo-lsp: unsupported platform darwin\/arm64\. Ship a matching binary under bin\/\.$/,
-  );
+test("利用環境: Node.js 20以上とNode LSP packageを配布要件にする", () => {
+  assert.equal(pkg.engines.node, ">=20");
+  assert.equal(pkg.dependencies["@todo-lsp/todo-core"], "file:../packages/todo-core");
+  assert.equal(pkg.dependencies["@todo-lsp/todo-lsp"], "file:../packages/todo-lsp");
+  assert.equal(pkg.dependencies["vscode-languageclient"], "^9.0.1");
 });
 
 // §表示: the semantic-token color rules mirror SPEC.md's color tables.

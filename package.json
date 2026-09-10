@@ -1,0 +1,21 @@
+{
+  "name": "todo-lsp",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "format": "node scripts/check-format.mjs",
+    "lint": "node scripts/lint.mjs",
+    "pack": "npm pack --dry-run --workspace=@todo-lsp/todo-core && npm pack --dry-run --workspace=@todo-lsp/todo-lsp",
+    "typecheck": "tsc -p packages/todo-core/tsconfig.json && npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "generate:grammar": "cd tree-sitter-todo && tree-sitter generate",
+    "test:grammar": "cd tree-sitter-todo && tree-sitter test"
+  },
+  "allowScripts": {
+    "tree-sitter-cli@0.25.10": true,
+    "emsdk@0.4.0": true
+  }
+}

@@ -10,6 +10,7 @@
     "url": "https://github.com/CatBraaain/todo-lsp.git"
   },
   "engines": {
+    "node": ">=20",
     "vscode": "^1.85.0"
   },
   "categories": [
@@ -254,13 +255,16 @@
     }
   },
   "scripts": {
-    "build": "node esbuild.js",
+    "build": "node esbuild.js && node scripts/stage-server.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test",
-    "package": "vsce package",
-    "vscode:prepublish": "node esbuild.js --production"
+    "test": "node --test test/autoRepeat.test.mjs test/manifest.test.mjs test/noNativeDependencies.test.mjs test/nodeVersion.test.mjs",
+    "test:vsix": "node --test test/vsix.test.mjs",
+    "package": "npm run build && vsce package --no-dependencies",
+    "vscode:prepublish": "node esbuild.js --production && node scripts/stage-server.mjs"
   },
   "dependencies": {
+    "@todo-lsp/todo-core": "file:../packages/todo-core",
+    "@todo-lsp/todo-lsp": "file:../packages/todo-lsp",
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {

@@ -1,6 +1,3 @@
-# Rust artifacts
-target/
-
 # Node artifacts
 build/
 prebuilds/
@@ -15,6 +12,7 @@ _obj/
 # Python artifacts
 .venv/
 dist/
+vscode-todo/server/
 *.egg-info
 *.whl
 
@@ -48,4 +46,3 @@ zig-out/
 *.jar
 
 .vscode-todo-language/*
-bin

@@ -1,0 +1,39 @@
+{
+  "name": "@todo-lsp/todo-core",
+  "version": "0.1.0",
+  "description": "Todo grammar parser core",
+  "license": "MIT",
+  "files": [
+    "dist/*.js",
+    "dist/*.d.ts",
+    "dist/tree-sitter-todo.wasm"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "npm run build:wasm && tsc -p tsconfig.json",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test dist/test/*.test.js",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "croner": "10.0.1",
+    "web-tree-sitter": "0.25.10"
+  },
+  "devDependencies": {
+    "@types/emscripten": "1.41.6",
+    "@types/node": "20.17.57",
+    "emsdk": "^0.4.0",
+    "tree-sitter-cli": "0.25.10",
+    "typescript": "5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@todo-lsp/todo-lsp",
+  "version": "0.1.0",
+  "description": "Todo language server protocol adapter",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "todo-lsp": "./dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test dist/test/*.test.js",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@todo-lsp/todo-core": "0.1.0",
+    "vscode-languageserver": "10.1.1",
+    "vscode-languageserver-textdocument": "1.0.14"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

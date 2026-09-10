@@ -1,4 +1,3 @@
-/// <reference types="./grammar.d.ts" />
 // @ts-check
 
 export default grammar({

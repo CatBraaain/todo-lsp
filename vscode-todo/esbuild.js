@@ -1,7 +1,9 @@
 // @ts-check
+const { rmSync } = require("node:fs");
 const esbuild = require("esbuild");
 
 const production = process.argv.includes("--production");
+if (production) rmSync("dist/extension.js.map", { force: true });
 
 esbuild
   .build({
