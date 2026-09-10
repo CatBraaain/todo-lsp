@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const vsix = join(root, "todo-0.1.0.vsix");
+const vsix = join(root, "dist", "todo-0.1.0.vsix");
 const server = "extension/server/node_modules/@todo-lsp/todo-lsp/dist/main.js";
 
 test("VSIX: ships the Node 20 requirement, LSP, core WASM, and runtime dependencies", () => {

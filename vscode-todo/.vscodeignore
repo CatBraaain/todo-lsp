@@ -8,3 +8,4 @@ test/**
 **/*.ts.map
 **/tsconfig.json
 **/esbuild.js
+*.vsix

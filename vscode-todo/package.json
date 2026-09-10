@@ -259,7 +259,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test test/autoRepeat.test.mjs test/manifest.test.mjs test/noNativeDependencies.test.mjs test/nodeVersion.test.mjs",
     "test:vsix": "node --test test/vsix.test.mjs",
-    "package": "npm run build && vsce package --no-dependencies",
+    "package": "npm run build && vsce package --no-dependencies --out dist",
     "vscode:prepublish": "node esbuild.js --production && node scripts/stage-server.mjs"
   },
   "dependencies": {
