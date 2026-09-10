@@ -45,4 +45,7 @@ zig-out/
 *.zip
 *.jar
 
+# Screenshots (VSCode review artifacts)
+screenshots/
+
 .vscode-todo-language/*
