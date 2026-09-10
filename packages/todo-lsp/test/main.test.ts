@@ -125,23 +125,8 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
     },
     full: { delta: true },
   });
-  assert.deepEqual((capabilities.executeCommandProvider as { commands: string[] }).commands, [
-    "todo-language.toggleDone",
-    "todo-language.toggleCancelled",
-    "todo-language.toggleStart",
-    "todo-language.toggleDue",
-    "todo-language.toggleQueue",
-    "todo-language.toggleQueueUnshift",
-    "todo-language.toggleWaiting",
-    "todo-language.togglePending",
-    "todo-language.toggleHide",
-    "todo-language.toggleRepeat",
-    "todo-language.indent",
-    "todo-language.dedent",
-    "todo-language.repeatTasks",
-    "todo-language.archive",
-    "todo-language.unarchive",
-  ]);
+  // executeCommandProvider は advertise しない（拡張側の手動登録と衝突するため）。
+  assert.equal(capabilities.executeCommandProvider, undefined);
 
   rpc.send({ method: "initialized", params: {} });
   const uri = "file:///smoke.todo";

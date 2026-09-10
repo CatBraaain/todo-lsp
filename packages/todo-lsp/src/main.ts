@@ -42,24 +42,6 @@ import {
   type TodoParser,
 } from "@todo-lsp/todo-core";
 
-const COMMANDS = [
-  "todo-language.toggleDone",
-  "todo-language.toggleCancelled",
-  "todo-language.toggleStart",
-  "todo-language.toggleDue",
-  "todo-language.toggleQueue",
-  "todo-language.toggleQueueUnshift",
-  "todo-language.toggleWaiting",
-  "todo-language.togglePending",
-  "todo-language.toggleHide",
-  "todo-language.toggleRepeat",
-  "todo-language.indent",
-  "todo-language.dedent",
-  "todo-language.repeatTasks",
-  "todo-language.archive",
-  "todo-language.unarchive",
-];
-
 type StoredDocument = {
   document: TextDocument;
   tree: ReturnType<TodoParser["parse"]>;
@@ -152,7 +134,9 @@ class TodoLanguageServer {
         foldingRangeProvider: true,
         documentLinkProvider: { resolveProvider: false },
         documentFormattingProvider: true,
-        executeCommandProvider: { commands: COMMANDS },
+        // executeCommandProvider は advertise しない。advertise すると vscode-languageclient が
+        // 同名コマンドを自動登録し、拡張側の手動登録と衝突する（command already exists）。
+        // コマンドは拡張が workspace/executeCommand で直接呼ぶため、onExecuteCommand は残す。
         semanticTokensProvider: {
           legend: semanticTokensLegend(),
           full: { delta: true },
