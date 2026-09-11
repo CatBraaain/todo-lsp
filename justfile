@@ -10,10 +10,15 @@ test:
   npm test
   npm run test:grammar
 
+# Build the extension, then take SPEC screenshots into screenshots/<timestamp>/.
+screenshot:
+  cd vscode-todo && npm run build
+  npm ci --prefix scripts/screenshot
+  bash scripts/screenshot/run.sh
+
 # Build everything, package the VSIX, verify it, and take SPEC screenshots.
 package:
   npm run generate:grammar
   npm run build
   cd vscode-todo && npm ci && npm run package && npm run test:vsix
-  npm ci --prefix scripts/screenshot
-  bash scripts/screenshot/run.sh
+  just screenshot
