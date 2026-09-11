@@ -1,0 +1,29 @@
+Inbox:
+    buy milk @done(2024-01-01)
+    call mom @done(2024-01-01)
+    Project:
+        draft spec @priority(high)
+        review @done
+    wrap up
+Dates:
+    past start @start(2024-01-01)
+    future start @start(2099-12-31)
+    bad start @start(not-a-date)
+    start without arg @start
+    past due @due(2024-01-01)
+    future due @due(2099-12-31)
+    bad due @due(not-a-date)
+    due without arg @due
+Repeat:
+    valid cron @repeat(0 0 * * *)
+    bad cron @repeat(not-a-cron)
+    repeat without arg @repeat
+Tags:
+    queue one @queue(1)
+    queue two @queue(2)
+    cancelled task @cancelled
+    hidden task @hide
+Decorations:
+    **bold** *italic* `code` <https://example.com>
+Archive:
+    old task

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Launch VSCode (Extension Development Host) under Xvfb and screenshot the workbench.
-# The shot is taken over CDP with scripts/screenshot/shot.mjs.
+# Launch VSCode (Extension Development Host) under Xvfb and take the SPEC screenshots.
+# The shots are taken over CDP with scripts/screenshot/shot.mjs.
 #
-# Usage: scripts/screenshot/run.sh [out.png] [file-to-open]
-#   out.png defaults to screenshots/<timestamp>-vscode.png (gitignored).
+# Usage: scripts/screenshot/run.sh [outdir]
+#   outdir defaults to screenshots/<timestamp> (gitignored).
+#   Produces complete.png, highlighting.png, fold-comments.png, fold-headings.png
+#   as specified by SPEC.md §スクショ, opening scripts/screenshot/sample.todo.
 #
 # Notes:
 # - WSLg sockets are unreachable from the agent sandbox; Xvfb provides the display.
@@ -12,10 +14,10 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-OUT="${1:-$REPO/screenshots/$(date +%Y%m%d-%H%M%S)-vscode.png}"
-OPEN_FILE="${2:-}"
+OUT="${1:-$REPO/screenshots/$(date +%Y%m%d-%H%M%S)}"
 EXTDIR="$REPO/vscode-todo"
 SHOT="$(dirname "$0")/shot.mjs"
+SAMPLE="$(dirname "$0")/sample.todo"
 
 rm -rf /tmp/vscode-shot-data /tmp/vscode-shot-ext /tmp/vscode-home
 mkdir -p /tmp/vscode-shot-data/User /tmp/vscode-home/.vscode
@@ -26,11 +28,17 @@ cat > /tmp/vscode-shot-data/User/settings.json <<'EOF'
   "workbench.startupEditor": "none",
   "update.mode": "none",
   "extensions.ignoreRecommendations": true,
-  "chat.disableAIFeatures": true
+  "chat.disableAIFeatures": true,
+  "todo-language.repeatTask.autoRepeat": false,
+  "window.newWindowDimensions": "maximized",
+  "editor.minimap.enabled": false,
+  "json.validate.enable": false,
+  "timeline.enabled": false,
+  "breadcrumbs.enabled": false
 }
 EOF
 
-Xvfb :99 -screen 0 1600x1000x24 -nolisten tcp > /tmp/xvfb.log 2>&1 &
+Xvfb :99 -screen 0 1600x1400x24 -nolisten tcp > /tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
 sleep 1
 
@@ -41,16 +49,21 @@ HOME=/tmp/vscode-home DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS="disabled:" \
   --user-data-dir=/tmp/vscode-shot-data --extensions-dir=/tmp/vscode-shot-ext \
   --remote-debugging-port=9222 --remote-allow-origins='*' \
   --extensionDevelopmentPath="$EXTDIR" \
-  "$REPO" $OPEN_FILE > /tmp/vscode-electron.log 2>&1 &
+  "$REPO" "$SAMPLE" > /tmp/vscode-electron.log 2>&1 &
 VSCODE_PID=$!
 
 UP=0
+DIED=0
 for _ in $(seq 1 40); do
   if curl -s -m 2 http://127.0.0.1:9222/json/version 2>/dev/null | grep -q webSocketDebuggerUrl; then UP=1; break; fi
-  if ! kill -0 "$VSCODE_PID" 2>/dev/null; then echo "vscode died; see /tmp/vscode-electron.log" >&2; break; fi
+  if ! kill -0 "$VSCODE_PID" 2>/dev/null; then DIED=1; echo "vscode died; see /tmp/vscode-electron.log" >&2; break; fi
   sleep 1
 done
+if [ "$UP" = 0 ] && [ "$DIED" = 0 ]; then
+  echo "timeout waiting for vscode CDP; see /tmp/vscode-electron.log" >&2
+fi
 
+SHOT_STATUS=1
 if [ "$UP" = 1 ]; then
   for _ in $(seq 1 30); do
     if curl -s -m 2 http://127.0.0.1:9222/json 2>/dev/null | grep -q 'vscode-file://'; then break; fi
@@ -58,7 +71,11 @@ if [ "$UP" = 1 ]; then
   done
   sleep 8   # extension activation + LSP startup + first semantic tokens
   node "$SHOT" "$OUT" --wait 3000
+  SHOT_STATUS=$?
 fi
 
 kill "$VSCODE_PID" "$XVFB_PID" 2>/dev/null
-exit 0
+if [ "$UP" = 1 ] && [ "$SHOT_STATUS" = 0 ]; then
+  exit 0
+fi
+exit 1
