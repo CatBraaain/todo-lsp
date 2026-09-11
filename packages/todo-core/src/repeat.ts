@@ -10,7 +10,7 @@ interface Node {
 }
 
 /** Generate the most recent task for every valid `@repeat` definition. */
-export function repeatTasks(source: string, now = new Date()): string {
+export function repeatTasks(source: string, now = new Date(), tabSize = 4): string {
   const lines = splitLines(source);
   if (lines.length === 0) return source;
 
@@ -21,12 +21,19 @@ export function repeatTasks(source: string, now = new Date()): string {
     if (previous !== undefined) definitions.push([line, previous]);
   }
 
-  for (const [definition, previous] of definitions) processDefinition(lines, definition, previous);
+  for (const [definition, previous] of definitions) {
+    processDefinition(lines, definition, previous, tabSize);
+  }
 
-  return formatDocument(joinLines(lines, source));
+  return formatDocument(joinLines(lines, source), tabSize);
 }
 
-function processDefinition(lines: string[], definition: string, previous: Date): void {
+function processDefinition(
+  lines: string[],
+  definition: string,
+  previous: Date,
+  tabSize: number,
+): void {
   const parts = parseLine(definition);
 
   const start = tagArg(parts, "start");
@@ -42,15 +49,15 @@ function processDefinition(lines: string[], definition: string, previous: Date):
 
   let container: number | undefined;
   for (const parentName of path) {
-    const child = findChild(lines, container, parentName);
+    const child = findChild(lines, container, parentName, tabSize);
     if (child !== undefined) {
       container = child;
       continue;
     }
 
-    const insertAt = blockEnd(lines, container) + 1;
-    lines.splice(insertAt, 0, `${indentForContainer(lines, container)}${parentName}`);
-    container = nodes(lines).findIndex((node) => node.line === insertAt);
+    const insertAt = blockEnd(lines, container, tabSize) + 1;
+    lines.splice(insertAt, 0, `${indentForContainer(lines, container, tabSize)}${parentName}`);
+    container = nodes(lines, tabSize).findIndex((node) => node.line === insertAt);
   }
 
   const exists = lines.some((line) => {
@@ -64,11 +71,11 @@ function processDefinition(lines: string[], definition: string, previous: Date):
   });
   if (exists) return;
 
-  const insertAt = blockEnd(lines, container) + 1;
+  const insertAt = blockEnd(lines, container, tabSize) + 1;
   lines.splice(
     insertAt,
     0,
-    `${indentForContainer(lines, container)}${name} @start(${renderLocalDate(previous)})`,
+    `${indentForContainer(lines, container, tabSize)}${name} @start(${renderLocalDate(previous)})`,
   );
 }
 
@@ -84,10 +91,10 @@ function previousOccurrence(expression: string, now: Date): Date | undefined {
   );
 }
 
-function nodes(lines: readonly string[]): Node[] {
+function nodes(lines: readonly string[], tabSize: number): Node[] {
   const nodes: Node[] = [];
   for (const [line, text] of lines.entries()) {
-    const parts = parseLine(text);
+    const parts = parseLine(text, tabSize);
     if (isBlank(parts)) continue;
     let parent: number | undefined;
     for (let index = nodes.length - 1; index >= 0; index--) {
@@ -105,8 +112,9 @@ function findChild(
   lines: readonly string[],
   container: number | undefined,
   name: string,
+  tabSize: number,
 ): number | undefined {
-  const structure = nodes(lines);
+  const structure = nodes(lines, tabSize);
   const index = structure.findIndex((node) => {
     if (node.parent !== container) return false;
     const line = lines[node.line];
@@ -115,8 +123,12 @@ function findChild(
   return index === -1 ? undefined : index;
 }
 
-function blockEnd(lines: readonly string[], container: number | undefined): number {
-  const structure = nodes(lines);
+function blockEnd(
+  lines: readonly string[],
+  container: number | undefined,
+  tabSize: number,
+): number {
+  const structure = nodes(lines, tabSize);
   if (container === undefined) return structure.at(-1)?.line ?? -1;
 
   const start = structure[container];
@@ -129,8 +141,14 @@ function blockEnd(lines: readonly string[], container: number | undefined): numb
   return end;
 }
 
-function indentForContainer(lines: readonly string[], container: number | undefined): string {
-  return container === undefined ? "" : indentForLevel(nodes(lines)[container].level + 1);
+function indentForContainer(
+  lines: readonly string[],
+  container: number | undefined,
+  tabSize: number,
+): string {
+  return container === undefined
+    ? ""
+    : indentForLevel(nodes(lines, tabSize)[container].level + 1, tabSize);
 }
 
 function parseLocalDate(text: string): Date | undefined {

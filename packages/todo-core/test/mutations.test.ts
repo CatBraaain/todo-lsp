@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   archive,
   formatDocument,
+  indentUnits,
   lineEdits,
   matchEol,
   reindent,
@@ -89,6 +90,18 @@ test("indent and dedent use four spaces and clamp at level zero", () => {
   assert.equal(reindent("a\n\n", [0, 1], -5), "a\n\n");
 });
 
+test("indent and dedent write one level as tab-size spaces", () => {
+  assert.equal(reindent("a\n    b\n", [0, 1], 1, 2), "  a\n      b\n");
+  assert.equal(reindent("  a\n\n", [0, 1], -5, 2), "a\n\n");
+});
+
+test("indent measurement advances a tab to the next tab-size multiple", () => {
+  assert.equal(indentUnits("\t", 2), 2);
+  assert.equal(indentUnits(" \t", 2), 2);
+  assert.equal(indentUnits("\t\t", 4), 8);
+  assert.equal(indentUnits("\t", 4), 4);
+});
+
 test("format normalizes structure, whitespace, blank lines, and heading spacing", () => {
   const input = "\n  A:\n        child   @done\n\n\nplain\nB:\n  b\n";
   assert.equal(formatDocument(input), "A:\n    child @done\n\nplain\n\nB:\n    b\n");
@@ -96,6 +109,16 @@ test("format normalizes structure, whitespace, blank lines, and heading spacing"
   assert.equal(formatDocument("plain"), "plain\n");
   const once = formatDocument(input);
   assert.equal(formatDocument(once), once);
+});
+
+test("format rounds a partially indented child up to its parent level + 1", () => {
+  const input = "A:\n   child\n      mid\n";
+  assert.equal(formatDocument(input, 4), "A:\n    child\n        mid\n");
+});
+
+test("format writes one level as tab-size spaces", () => {
+  assert.equal(formatDocument("A:\n  child\n", 2), "A:\n  child\n");
+  assert.equal(formatDocument("A:\n child\n", 2), "A:\n  child\n");
 });
 
 test("toggle applies document formatting after updating the selected tag", () => {
@@ -111,6 +134,18 @@ test("formatting and command results preserve CRLF", () => {
   assert.equal(formatDocument(source), "A:\r\n    task\r\n");
   assert.equal(toggle("task\r\n", [0], Toggle.Done, today), "task @done(2024-06-15)\r\n");
   assert.equal(reindent("task\r\n", [0], 1), "    task\r\n");
+});
+
+test("format resolves mixed CRLF and LF to CRLF", () => {
+  // SPEC §改行コード: a document mixing CRLF and LF formats as CRLF.
+  assert.equal(
+    formatDocument("A:\n   child\nB:\r\n  b\n"),
+    "A:\r\n    child\r\n\r\nB:\r\n    b\r\n",
+  );
+  assert.equal(
+    reindent("A:\n   child\nB:\r\n  b\n", [0, 1], 1),
+    "    A:\r\n    child\r\nB:\r\n  b\r\n",
+  );
 });
 
 test("archive moves selected all-gray top-level blocks under Archive", () => {

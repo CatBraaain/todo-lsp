@@ -302,6 +302,122 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
   await exited;
 });
 
+test("stdio adapter formats with the formatting request's tab size", async (context) => {
+  const serverProcess = spawn(process.execPath, [new URL("../main.js", import.meta.url).pathname]);
+  const rpc = new JsonRpcClient(serverProcess);
+  context.after(() => {
+    if (!serverProcess.killed) serverProcess.kill();
+  });
+
+  await rpc.request(1, "initialize", { processId: null, capabilities: {} });
+  rpc.send({ method: "initialized", params: {} });
+
+  const uri = "file:///formatting-tab-size.todo";
+  const text = "Project:\n    child\n        grandchild\n";
+  rpc.send({
+    method: "textDocument/didOpen",
+    params: { textDocument: { uri, languageId: "todo", version: 1, text } },
+  });
+  await rpc.next((message) => message.method === "textDocument/publishDiagnostics");
+
+  // §タブサイズ: the request's tabSize option drives the indent width — 2
+  // spaces per level, not the default 4.
+  const formatted = await rpc.request(2, "textDocument/formatting", {
+    textDocument: { uri },
+    options: { tabSize: 2, insertSpaces: true },
+  });
+  assert.deepEqual(formatted.result, [
+    {
+      range: { start: { line: 0, character: 0 }, end: { line: 3, character: 0 } },
+      newText: "Project:\n  child\n    grandchild\n",
+    },
+  ]);
+
+  const exited = new Promise<void>((resolve) => serverProcess.once("exit", () => resolve()));
+  await rpc.request(3, "shutdown", null);
+  rpc.send({ method: "exit", params: null });
+  await exited;
+});
+
+test("stdio adapter formats non-positive tab sizes with the default of 4", async (context) => {
+  const serverProcess = spawn(process.execPath, [new URL("../main.js", import.meta.url).pathname]);
+  const rpc = new JsonRpcClient(serverProcess);
+  context.after(() => {
+    if (!serverProcess.killed) serverProcess.kill();
+  });
+
+  await rpc.request(1, "initialize", { processId: null, capabilities: {} });
+  rpc.send({ method: "initialized", params: {} });
+
+  const uri = "file:///formatting-non-positive-tab-size.todo";
+  const text = "Project:\n  child\n    grandchild\n";
+  rpc.send({
+    method: "textDocument/didOpen",
+    params: { textDocument: { uri, languageId: "todo", version: 1, text } },
+  });
+  await rpc.next((message) => message.method === "textDocument/publishDiagnostics");
+
+  // §タブサイズ: a non-positive tabSize option is not a positive number, so
+  // formatting falls back to the default of 4 spaces per level.
+  for (const [index, tabSize] of [0, -2].entries()) {
+    const formatted = await rpc.request(2 + index, "textDocument/formatting", {
+      textDocument: { uri },
+      options: { tabSize, insertSpaces: true },
+    });
+    assert.deepEqual(formatted.result, [
+      {
+        range: { start: { line: 0, character: 0 }, end: { line: 3, character: 0 } },
+        newText: "Project:\n    child\n        grandchild\n",
+      },
+    ]);
+  }
+
+  const exited = new Promise<void>((resolve) => serverProcess.once("exit", () => resolve()));
+  await rpc.request(4, "shutdown", null);
+  rpc.send({ method: "exit", params: null });
+  await exited;
+});
+
+test("stdio adapter applies the executeCommand argument's trailing tab size", async (context) => {
+  const serverProcess = spawn(process.execPath, [new URL("../main.js", import.meta.url).pathname]);
+  const rpc = new JsonRpcClient(serverProcess);
+  context.after(() => {
+    if (!serverProcess.killed) serverProcess.kill();
+  });
+
+  await rpc.request(1, "initialize", { processId: null, capabilities: {} });
+  rpc.send({ method: "initialized", params: {} });
+
+  const uri = "file:///command-tab-size.todo";
+  const text = "Project:\n     task\n";
+  rpc.send({
+    method: "textDocument/didOpen",
+    params: { textDocument: { uri, languageId: "todo", version: 1, text } },
+  });
+  await rpc.next((message) => message.method === "textDocument/publishDiagnostics");
+
+  // §タブサイズ: the trailing command argument carries the document's tab
+  // size, so the toggle's post-tag §フォーマット writes 2-space levels.
+  rpc.send({
+    id: 2,
+    method: "workspace/executeCommand",
+    params: { command: "todo-language.toggleDone", arguments: [uri, [1], 2] },
+  });
+  const apply = await rpc.next((message) => message.method === "workspace/applyEdit");
+  const edits = (apply.params as { edit: { changes: Record<string, TextEdit[]> } }).edit.changes[
+    uri
+  ];
+  assert.ok(edits.length > 0);
+  rpc.send({ id: apply.id, result: { applied: true } });
+  await rpc.next((message) => message.id === 2);
+  assert.equal(applyEdits(text, edits), `Project:\n  task @done(${localDateText()})\n`);
+
+  const exited = new Promise<void>((resolve) => serverProcess.once("exit", () => resolve()));
+  await rpc.request(3, "shutdown", null);
+  rpc.send({ method: "exit", params: null });
+  await exited;
+});
+
 test("stdio adapter does not refresh semantic tokens for unsupported clients", async (context) => {
   const serverProcess = spawn(process.execPath, [new URL("../main.js", import.meta.url).pathname]);
   const rpc = new JsonRpcClient(serverProcess);

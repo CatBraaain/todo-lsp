@@ -46,10 +46,11 @@ export interface LineParts {
   /** Length of the leading whitespace (spaces and tabs), in UTF-16 code
    * units. */
   indentLen: number;
-  /** Indent measurement (4 spaces per level; tab = to the next multiple of
-   * 4). Structure is decided by comparing these relatively. */
+  /** Indent measurement (tabSize spaces per level; tab = to the next
+   * multiple of tabSize). Structure is decided by comparing these
+   * relatively. */
   units: number;
-  /** The level per SPEC.md's formula (`units / 4`), used when writing
+  /** The level per SPEC.md's formula (`units / tabSize`), used when writing
    * indents (indent / dedent commands). */
   level: number;
   /** The leading tag column (行頭タグ列), in line order. Empty when the
@@ -160,38 +161,39 @@ function collapseAsciiWhitespace(text: string): string {
     .join(" ");
 }
 
-/** SPEC.md インデントレベルの測定単位: 4 spaces per level; a tab advances
- * to the next multiple of 4 (so up to 3 preceding spaces merge with it).
- * Structure (parent / child / sibling) is decided by comparing these units
- * relatively — any deeper indent makes a child. */
-export function indentUnits(indent: string): number {
+/** SPEC.md インデントレベルの測定単位: tabSize spaces per level; a tab
+ * advances to the next multiple of tabSize (so up to tabSize-1 preceding
+ * spaces merge with it). Structure (parent / child / sibling) is decided by
+ * comparing these units relatively — any deeper indent makes a child. */
+export function indentUnits(indent: string, tabSize = 4): number {
   let units = 0;
   for (const ch of indent) {
-    units = ch === "\t" ? (Math.floor(units / 4) + 1) * 4 : units + 1;
+    units = ch === "\t" ? (Math.floor(units / tabSize) + 1) * tabSize : units + 1;
   }
   return units;
 }
 
-/** The level per SPEC.md's formula: `units / 4` (the canonical level used
- * when writing indents — 4 spaces per level). */
-export function indentLevel(indent: string): number {
-  return Math.floor(indentUnits(indent) / 4);
+/** The level per SPEC.md's formula: `units / tabSize` (the canonical level
+ * used when writing indents — tabSize spaces per level). */
+export function indentLevel(indent: string, tabSize = 4): number {
+  return Math.floor(indentUnits(indent, tabSize) / tabSize);
 }
 
-/** The canonical indentation for a level: 4 spaces per level (§インデント). */
-export function indentForLevel(level: number): string {
-  return " ".repeat(4 * level);
+/** The canonical indentation for a level: tabSize spaces per level
+ * (§インデント). */
+export function indentForLevel(level: number, tabSize = 4): string {
+  return " ".repeat(tabSize * level);
 }
 
 /** Parse one physical line (newline already stripped) into `LineParts`. */
-export function parseLine(line: string): LineParts {
+export function parseLine(line: string, tabSize = 4): LineParts {
   let indentLen = 0;
   while (indentLen < line.length && (line[indentLen] === " " || line[indentLen] === "\t")) {
     indentLen++;
   }
   const indent = line.slice(0, indentLen);
-  const units = indentUnits(indent);
-  const level = indentLevel(indent);
+  const units = indentUnits(indent, tabSize);
+  const level = indentLevel(indent, tabSize);
   const blank: LineParts = {
     lineKind: { kind: "blank" },
     indentLen,

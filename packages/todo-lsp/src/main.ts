@@ -126,7 +126,8 @@ class TodoLanguageServer {
       if (!document) return [];
 
       const text = document.getText();
-      const formatted = matchEol(text, formatDocument(text));
+      const tabSize = tabSizeOf(params.options.tabSize);
+      const formatted = matchEol(text, formatDocument(text, tabSize));
       return formatted === text ? [] : [{ range: endRange(text), newText: formatted }];
     });
     this.connection.onExecuteCommand((params) =>
@@ -221,8 +222,9 @@ class TodoLanguageServer {
     if (!stored) return undefined;
 
     const selection = lineSelection(arguments_?.[1]);
+    const tabSize = tabSizeOf(arguments_?.at(-1));
     const oldText = stored.document.getText();
-    const newText = commandResult(command, oldText, selection);
+    const newText = commandResult(command, oldText, selection, tabSize);
     if (!newText || newText === oldText) return undefined;
 
     const edits = lineEdits(oldText, newText).map(textEdit);
@@ -244,39 +246,40 @@ function commandResult(
   command: string,
   text: string,
   selection: readonly number[],
+  tabSize: number,
 ): string | undefined {
   const today = new Date();
   switch (command) {
     case "todo-language.toggleDone":
-      return toggle(text, selection, Toggle.Done, today);
+      return toggle(text, selection, Toggle.Done, today, tabSize);
     case "todo-language.toggleCancelled":
-      return toggle(text, selection, Toggle.Cancelled, today);
+      return toggle(text, selection, Toggle.Cancelled, today, tabSize);
     case "todo-language.toggleStart":
-      return toggle(text, selection, Toggle.Start, today);
+      return toggle(text, selection, Toggle.Start, today, tabSize);
     case "todo-language.toggleDue":
-      return toggle(text, selection, Toggle.Due, today);
+      return toggle(text, selection, Toggle.Due, today, tabSize);
     case "todo-language.toggleQueue":
-      return toggle(text, selection, Toggle.Queue, today);
+      return toggle(text, selection, Toggle.Queue, today, tabSize);
     case "todo-language.toggleQueueUnshift":
-      return toggle(text, selection, Toggle.QueueUnshift, today);
+      return toggle(text, selection, Toggle.QueueUnshift, today, tabSize);
     case "todo-language.toggleWaiting":
-      return toggle(text, selection, Toggle.Waiting, today);
+      return toggle(text, selection, Toggle.Waiting, today, tabSize);
     case "todo-language.togglePending":
-      return toggle(text, selection, Toggle.Pending, today);
+      return toggle(text, selection, Toggle.Pending, today, tabSize);
     case "todo-language.toggleHide":
-      return toggle(text, selection, Toggle.Hide, today);
+      return toggle(text, selection, Toggle.Hide, today, tabSize);
     case "todo-language.toggleRepeat":
-      return toggle(text, selection, Toggle.Repeat, today);
+      return toggle(text, selection, Toggle.Repeat, today, tabSize);
     case "todo-language.indent":
-      return reindent(text, selection, 1);
+      return reindent(text, selection, 1, tabSize);
     case "todo-language.dedent":
-      return reindent(text, selection, -1);
+      return reindent(text, selection, -1, tabSize);
     case "todo-language.repeatTasks":
-      return repeatTasks(text);
+      return repeatTasks(text, today, tabSize);
     case "todo-language.archive":
-      return archive(text, selection);
+      return archive(text, selection, tabSize);
     case "todo-language.unarchive":
-      return unarchive(text, selection);
+      return unarchive(text, selection, tabSize);
     default:
       return undefined;
   }
@@ -329,6 +332,13 @@ function sameToken(
 function lineSelection(value: unknown): number[] {
   if (!Array.isArray(value)) return [];
   return value.filter((line): line is number => Number.isSafeInteger(line) && line >= 0);
+}
+
+/** The requested tab size (formatting option or trailing command argument),
+ * or the §タブサイズ default of 4 when the value is not a positive finite
+ * number. */
+function tabSizeOf(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 4;
 }
 
 function diagnostic(value: {

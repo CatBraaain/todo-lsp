@@ -34,6 +34,7 @@ export function toggle(
   selection: readonly number[],
   action: Toggle,
   today: Date,
+  tabSize = 4,
 ): string {
   const lines = splitLines(source);
   const targets = structureLines(lines, selection);
@@ -45,10 +46,14 @@ export function toggle(
 
   for (const index of targets) {
     if (allHave) {
-      lines[index] = retag(lines[index], (leading, trailing) => {
-        removeTags(leading, name);
-        removeTags(trailing, name);
-      });
+      lines[index] = retag(
+        lines[index],
+        (leading, trailing) => {
+          removeTags(leading, name);
+          removeTags(trailing, name);
+        },
+        tabSize,
+      );
       continue;
     }
     if (hasTag(lines[index], name)) continue;
@@ -58,25 +63,34 @@ export function toggle(
         ? ["done", "cancelled", "queue", "waiting", "pending"]
         : [];
     const tag = newTag(tagForAction(action, today, queueNumber));
-    lines[index] = retag(lines[index], (leading, trailing) => {
-      removeTagsByName(leading, removed);
-      removeTagsByName(trailing, removed);
-      trailing.push(tag);
-    });
+    lines[index] = retag(
+      lines[index],
+      (leading, trailing) => {
+        removeTagsByName(leading, removed);
+        removeTagsByName(trailing, removed);
+        trailing.push(tag);
+      },
+      tabSize,
+    );
   }
 
-  if (action === "queue" || action === "queueUnshift") renumberQueues(lines);
-  return formatDocument(joinLines(lines, source));
+  if (action === "queue" || action === "queueUnshift") renumberQueues(lines, tabSize);
+  return formatDocument(joinLines(lines, source), tabSize);
 }
 
 /** Indent or dedent selected non-blank lines by one or more levels. */
-export function reindent(source: string, selection: readonly number[], delta: number): string {
+export function reindent(
+  source: string,
+  selection: readonly number[],
+  delta: number,
+  tabSize = 4,
+): string {
   const lines = splitLines(source);
   for (const index of structureLines(lines, selection)) {
     const line = lines[index];
-    const parts = parseLine(line);
+    const parts = parseLine(line, tabSize);
     const level = Math.max(0, parts.level + delta);
-    lines[index] = `${indentForLevel(level)}${line.slice(parts.indentLen)}`;
+    lines[index] = `${indentForLevel(level, tabSize)}${line.slice(parts.indentLen)}`;
   }
   return joinLines(lines, source);
 }
@@ -128,7 +142,7 @@ function nextQueueNumber(lines: readonly string[]): number {
   );
 }
 
-function renumberQueues(lines: string[]): void {
+function renumberQueues(lines: string[], tabSize: number): void {
   const numbers = [
     ...new Set(
       lines.flatMap((line) => {
@@ -142,10 +156,14 @@ function renumberQueues(lines: string[]): void {
 
   for (let index = 0; index < lines.length; index++) {
     if (!hasTag(lines[index], "queue")) continue;
-    lines[index] = retag(lines[index], (leading, trailing) => {
-      renumberTagColumn(leading, numbers);
-      renumberTagColumn(trailing, numbers);
-    });
+    lines[index] = retag(
+      lines[index],
+      (leading, trailing) => {
+        renumberTagColumn(leading, numbers);
+        renumberTagColumn(trailing, numbers);
+      },
+      tabSize,
+    );
   }
 }
 
@@ -156,12 +174,16 @@ function renumberTagColumn(tags: Tag[], numbers: readonly number[]): void {
   }
 }
 
-function retag(line: string, edit: (leading: Tag[], trailing: Tag[]) => void): string {
-  const parts = parseLine(line);
+function retag(
+  line: string,
+  edit: (leading: Tag[], trailing: Tag[]) => void,
+  tabSize: number,
+): string {
+  const parts = parseLine(line, tabSize);
   const leading = parts.leadingTags.map((tag) => ({ ...tag }));
   const trailing = parts.tags.map((tag) => ({ ...tag }));
   edit(leading, trailing);
-  return `${indentForLevel(parts.level)}${render(parts, line, leading, trailing)}`;
+  return `${indentForLevel(parts.level, tabSize)}${render(parts, line, leading, trailing)}`;
 }
 
 function removeTags(tags: Tag[], name: string): void {

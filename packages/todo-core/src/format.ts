@@ -15,11 +15,11 @@ export function joinLines(lines: readonly string[], original: string): string {
 }
 
 /** Format a document according to SPEC.md §フォーマット. */
-export function formatDocument(source: string): string {
+export function formatDocument(source: string, tabSize = 4): string {
   const lines = splitLines(source);
   if (lines.every((line) => isBlank(parseLine(line)))) return "";
 
-  const normalized = normalizeLines(lines);
+  const normalized = normalizeLines(lines, tabSize);
   const collapsed = collapseBlankLines(normalized);
   const formatted = addHeadingBlockBlanks(collapsed);
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
@@ -32,12 +32,12 @@ interface NormalizedLine {
   heading: boolean;
 }
 
-function normalizeLines(lines: readonly string[]): NormalizedLine[] {
+function normalizeLines(lines: readonly string[], tabSize: number): NormalizedLine[] {
   const parents: Array<{ units: number; level: number }> = [];
   const normalized: NormalizedLine[] = [];
 
   for (const line of lines) {
-    const parts = parseLine(line);
+    const parts = parseLine(line, tabSize);
     if (isBlank(parts)) {
       normalized.push({ text: "", level: 0, heading: false });
       continue;
@@ -50,7 +50,7 @@ function normalizeLines(lines: readonly string[]): NormalizedLine[] {
     const normalizedLevel = level + 1;
     parents.push({ units: parts.units, level: normalizedLevel });
     normalized.push({
-      text: `${indentForLevel(normalizedLevel)}${normalizeBody(parts, line)}`,
+      text: `${indentForLevel(normalizedLevel, tabSize)}${normalizeBody(parts, line)}`,
       level: normalizedLevel,
       heading: isHeading(parts),
     });

@@ -10,6 +10,7 @@ import {
 import { setupAutoRepeatTriggers, shouldAutoRepeat } from "./autoRepeatCore.mjs";
 import { COMMAND_SPECS } from "./commandSpecs.mjs";
 import { assertNode20OrLater } from "./nodeVersion.mjs";
+import { effectiveTabSize } from "./tabSize.mjs";
 
 let client: LanguageClient | undefined;
 
@@ -33,6 +34,14 @@ function selectionLines(editor: vscode.TextEditor): number[] {
   return [...lines].sort((a, b) => a - b);
 }
 
+/** The document's effective tab size (§タブサイズ): the vscode `editor.tabSize`
+ * setting lookup injected into the pure resolver (src/tabSize.mjs). */
+function documentTabSize(editor: vscode.TextEditor): number {
+  return effectiveTabSize(editor, () =>
+    vscode.workspace.getConfiguration("editor", editor.document).get("tabSize", 4),
+  );
+}
+
 function setupAutoRepeat(context: vscode.ExtensionContext, languageClient: LanguageClient): void {
   const fire = (): unknown => {
     const editor = vscode.window.activeTextEditor;
@@ -44,7 +53,7 @@ function setupAutoRepeat(context: vscode.ExtensionContext, languageClient: Langu
     }
     return languageClient.sendRequest(ExecuteCommandRequest.type, {
       command: "todo-language.repeatTasks",
-      arguments: [editor.document.uri.toString()],
+      arguments: [editor.document.uri.toString(), documentTabSize(editor)],
     });
   };
 
@@ -87,6 +96,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (spec.needsSelection) {
           args.push(selectionLines(editor));
         }
+        args.push(documentTabSize(editor));
         return client?.sendRequest(ExecuteCommandRequest.type, {
           command: spec.id,
           arguments: args,
