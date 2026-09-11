@@ -17,9 +17,6 @@
     "Programming Languages"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [
-    "onLanguage:todo"
-  ],
   "contributes": {
     "languages": [
       {
