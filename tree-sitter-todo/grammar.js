@@ -11,8 +11,7 @@ export default grammar({
     source_file: ($) =>
       seq(optional($._newline), repeat(choice($.heading_block, $.task_line, $.tag_only_line))),
 
-    heading_block: ($) =>
-      seq($.heading_line, optional(seq($.indent, $.task_block, $.dedent))),
+    heading_block: ($) => seq($.heading_line, optional(seq($.indent, $.task_block, $.dedent))),
 
     heading_line: ($) =>
       prec(1, prec.left(seq(optional(field("text", $.text)), $.colon, repeat($.tag), $._newline))),
@@ -21,8 +20,7 @@ export default grammar({
 
     task_block: ($) => repeat1(choice($.heading_block, $.task_line, $.tag_only_line)),
 
-    task_line: ($) =>
-      prec(1, prec.left(seq(field("text", $.text), repeat($.tag), $._newline))),
+    task_line: ($) => prec(1, prec.left(seq(field("text", $.text), repeat($.tag), $._newline))),
 
     // タグだけの行（本文のないタスク行、SPEC 用語 タスク行）。行頭タグ列が
     // 行全体を占める場合で、外部スキャナが TEXT を返さない位置に対応する。

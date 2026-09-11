@@ -12,7 +12,8 @@ interface Message {
 class JsonRpcClient {
   #buffer = Buffer.alloc(0);
   #messages: Message[] = [];
-  #waiters: Array<{ matches: (message: Message) => boolean; resolve: (message: Message) => void }> = [];
+  #waiters: Array<{ matches: (message: Message) => boolean; resolve: (message: Message) => void }> =
+    [];
 
   constructor(readonly process: ChildProcessWithoutNullStreams) {
     process.stdout.on("data", (chunk: Buffer) => this.read(chunk));
@@ -34,7 +35,10 @@ class JsonRpcClient {
     if (index !== -1) return Promise.resolve(this.#messages.splice(index, 1)[0]);
 
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timed out waiting for JSON-RPC message")), 5_000);
+      const timer = setTimeout(
+        () => reject(new Error("timed out waiting for JSON-RPC message")),
+        5_000,
+      );
       this.#waiters.push({
         matches,
         resolve: (message) => {
@@ -46,7 +50,8 @@ class JsonRpcClient {
   }
 
   expectNoMessage(matches: (message: Message) => boolean): Promise<void> {
-    if (this.#messages.some(matches)) return Promise.reject(new Error("unexpected JSON-RPC message"));
+    if (this.#messages.some(matches))
+      return Promise.reject(new Error("unexpected JSON-RPC message"));
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -75,7 +80,9 @@ class JsonRpcClient {
       const bodyStart = delimiter + 4;
       if (!Number.isSafeInteger(length) || this.#buffer.length < bodyStart + length) return;
 
-      const message = JSON.parse(this.#buffer.subarray(bodyStart, bodyStart + length).toString()) as Message;
+      const message = JSON.parse(
+        this.#buffer.subarray(bodyStart, bodyStart + length).toString(),
+      ) as Message;
       this.#buffer = this.#buffer.subarray(bodyStart + length);
       this.receive(message);
     }
@@ -102,7 +109,8 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
     processId: null,
     capabilities: { workspace: { semanticTokens: { refreshSupport: true } } },
   });
-  const capabilities = (initialize.result as { capabilities: Record<string, unknown> }).capabilities;
+  const capabilities = (initialize.result as { capabilities: Record<string, unknown> })
+    .capabilities;
   assert.equal(capabilities.positionEncoding, "utf-16");
   assert.deepEqual(capabilities.textDocumentSync, { openClose: true, change: 1 });
   assert.deepEqual(capabilities.documentLinkProvider, { resolveProvider: false });
@@ -135,7 +143,9 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
     method: "textDocument/didOpen",
     params: { textDocument: { uri, languageId: "todo", version: 1, text } },
   });
-  const diagnostics = await rpc.next((message) => message.method === "textDocument/publishDiagnostics");
+  const diagnostics = await rpc.next(
+    (message) => message.method === "textDocument/publishDiagnostics",
+  );
   assert.deepEqual((diagnostics.params as { diagnostics: unknown[] }).diagnostics, []);
 
   const symbols = await rpc.request(2, "textDocument/documentSymbol", { textDocument: { uri } });
@@ -215,9 +225,14 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
   assert.ok(changedDeltaResult.edits && changedDeltaResult.edits.length > 0);
   assert.equal("data" in changedDeltaResult, false);
 
-  const changedFull = await rpc.request(8, "textDocument/semanticTokens/full", { textDocument: { uri } });
+  const changedFull = await rpc.request(8, "textDocument/semanticTokens/full", {
+    textDocument: { uri },
+  });
   const changedFullData = (changedFull.result as { data: number[] }).data;
-  assert.deepEqual(applySemanticTokenEdits(fullResult.data, changedDeltaResult.edits), changedFullData);
+  assert.deepEqual(
+    applySemanticTokenEdits(fullResult.data, changedDeltaResult.edits),
+    changedFullData,
+  );
 
   const knownDelta = await rpc.request(9, "textDocument/semanticTokens/full/delta", {
     textDocument: { uri },
@@ -258,10 +273,18 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
       command: "todo-language.repeatTasks",
       text: "task @repeat(* * * * *)\n",
       assertText: (actual) =>
-        assert.match(actual, /^task @repeat\(\* \* \* \* \*\)\ntask @start\(\d{4}-\d{2}-\d{2} \d{2}:\d{2}\)\n$/),
+        assert.match(
+          actual,
+          /^task @repeat\(\* \* \* \* \*\)\ntask @start\(\d{4}-\d{2}-\d{2} \d{2}:\d{2}\)\n$/,
+        ),
     },
     exactCommand("todo-language.archive", "done @done\n", "Archive:\n    done @done\n"),
-    exactCommand("todo-language.unarchive", "Archive:\n    done @done\n", "Archive:\n\ndone @done\n", 1),
+    exactCommand(
+      "todo-language.unarchive",
+      "Archive:\n    done @done\n",
+      "Archive:\n\ndone @done\n",
+      1,
+    ),
   ];
   for (const [index, command] of commands.entries()) {
     await executeCommand(rpc, command, index);
@@ -303,7 +326,9 @@ test("stdio adapter does not refresh semantic tokens for unsupported clients", a
     params: { command: "todo-language.toggleDone", arguments: [uri, [0]] },
   });
   const apply = await rpc.next((message) => message.method === "workspace/applyEdit");
-  const edits = (apply.params as { edit: { changes: Record<string, TextEdit[]> } }).edit.changes[uri];
+  const edits = (apply.params as { edit: { changes: Record<string, TextEdit[]> } }).edit.changes[
+    uri
+  ];
   assert.ok(edits.length > 0);
   rpc.send({ id: apply.id, result: { applied: true } });
   await rpc.next((message) => message.id === 2);
@@ -350,7 +375,11 @@ function exactCommand(command: string, text: string, expected: string, selection
   return { command, text, selection, assertText: (actual) => assert.equal(actual, expected) };
 }
 
-async function executeCommand(rpc: JsonRpcClient, command: CommandCase, index: number): Promise<void> {
+async function executeCommand(
+  rpc: JsonRpcClient,
+  command: CommandCase,
+  index: number,
+): Promise<void> {
   const uri = `file:///command-${index}.todo`;
   rpc.send({
     method: "textDocument/didOpen",
@@ -365,7 +394,9 @@ async function executeCommand(rpc: JsonRpcClient, command: CommandCase, index: n
     params: { command: command.command, arguments: [uri, [command.selection ?? 0]] },
   });
   const apply = await rpc.next((message) => message.method === "workspace/applyEdit");
-  const edits = (apply.params as { edit: { changes: Record<string, TextEdit[]> } }).edit.changes[uri];
+  const edits = (apply.params as { edit: { changes: Record<string, TextEdit[]> } }).edit.changes[
+    uri
+  ];
   assert.ok(edits.length > 0, `${command.command} should apply edits`);
   const changedText = applyEdits(command.text, edits);
   command.assertText(changedText);
@@ -376,9 +407,13 @@ async function executeCommand(rpc: JsonRpcClient, command: CommandCase, index: n
     method: "textDocument/didChange",
     params: { textDocument: { uri, version: 2 }, contentChanges: [{ text: changedText }] },
   });
-  const diagnostics = await rpc.next((message) => message.method === "textDocument/publishDiagnostics");
+  const diagnostics = await rpc.next(
+    (message) => message.method === "textDocument/publishDiagnostics",
+  );
   assert.deepEqual((diagnostics.params as { diagnostics: unknown[] }).diagnostics, []);
-  const refresh = await rpc.next((message) => message.method === "workspace/semanticTokens/refresh");
+  const refresh = await rpc.next(
+    (message) => message.method === "workspace/semanticTokens/refresh",
+  );
   rpc.send({ id: refresh.id, result: null });
   await rpc.expectNoMessage((message) => message.method === "workspace/semanticTokens/refresh");
 
@@ -407,9 +442,13 @@ function applyEdits(source: string, edits: readonly TextEdit[]): string {
   return result;
 }
 
-function applySemanticTokenEdits(data: readonly number[], edits: readonly SemanticTokensEdit[]): number[] {
+function applySemanticTokenEdits(
+  data: readonly number[],
+  edits: readonly SemanticTokensEdit[],
+): number[] {
   const result = [...data];
-  for (const edit of [...edits].reverse()) result.splice(edit.start, edit.deleteCount, ...(edit.data ?? []));
+  for (const edit of [...edits].reverse())
+    result.splice(edit.start, edit.deleteCount, ...(edit.data ?? []));
   return result;
 }
 

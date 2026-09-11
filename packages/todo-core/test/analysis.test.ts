@@ -663,9 +663,7 @@ test("semantic tokens: repeat valid invalid", async () => {
 });
 
 test("semantic tokens: argumentless repeat tag is invalid", async () => {
-  assert.deepEqual(absPositions(semanticTokens("@repeat\n")), [
-    [0, 0, 7, REPEAT_TAG, INVALID],
-  ]);
+  assert.deepEqual(absPositions(semanticTokens("@repeat\n")), [[0, 0, 7, REPEAT_TAG, INVALID]]);
 });
 
 test("semantic tokens: cron L W hash extensions are valid", async () => {

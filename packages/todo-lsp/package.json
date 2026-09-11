@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "description": "Todo language server protocol adapter",
   "license": "MIT",
-  "type": "module",
   "bin": {
     "todo-lsp": "./dist/main.js"
   },
   "files": [
     "dist"
   ],
+  "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",

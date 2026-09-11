@@ -78,7 +78,8 @@ test("resolves direct path parents across blank lines", () => {
 });
 
 test("resolves nested path parents across blank lines", () => {
-  const source = "Home:\n\n    Kitchen:\n        dishes\nHome/Kitchen/mop floor @repeat(0 0 * * *)\n";
+  const source =
+    "Home:\n\n    Kitchen:\n        dishes\nHome/Kitchen/mop floor @repeat(0 0 * * *)\n";
   assert.equal(
     repeatTasks(source, noon),
     "Home:\n\n    Kitchen:\n        dishes\n        mop floor @start(2024-06-15)\nHome/Kitchen/mop floor @repeat(0 0 * * *)\n",
@@ -86,7 +87,8 @@ test("resolves nested path parents across blank lines", () => {
 });
 
 test("suppresses duplicates across blank lines", () => {
-  const source = "intro\n\nInbox:\n    buy milk @start(2024-06-15)\n\nInbox/buy milk @repeat(0 0 * * *)\n";
+  const source =
+    "intro\n\nInbox:\n    buy milk @start(2024-06-15)\n\nInbox/buy milk @repeat(0 0 * * *)\n";
   assert.equal(repeatTasks(source, noon), source);
 });
 

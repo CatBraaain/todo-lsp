@@ -9,8 +9,14 @@ const extension = readFileSync(join(root, "src", "extension.ts"), "utf8");
 
 test("拡張: Node stdio server replaces native platform binaries", () => {
   assert.match(extension, /command: process\.execPath/);
-  assert.match(extension, /path\.join\("server", "node_modules", "@todo-lsp", "todo-lsp", "dist", "main\.js"\)/);
-  assert.doesNotMatch(extension, /path\.join\("bin"|platformDirectoryName|serverBinaryName|todo-lsp\.exe/);
+  assert.match(
+    extension,
+    /path\.join\("server", "node_modules", "@todo-lsp", "todo-lsp", "dist", "main\.js"\)/,
+  );
+  assert.doesNotMatch(
+    extension,
+    /path\.join\("bin"|platformDirectoryName|serverBinaryName|todo-lsp\.exe/,
+  );
   assert.equal(existsSync(join(root, "src", "platform.mjs")), false);
 });
 

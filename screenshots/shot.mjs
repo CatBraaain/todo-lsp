@@ -90,7 +90,10 @@ async function showOutline() {
       .filter({ has: page.locator(".label-name", { hasText: new RegExp(`^${name}$`) }) })
       .first();
     if (!(await row.count())) continue;
-    await row.locator(".monaco-tl-twistie").click({ timeout: 3000 }).catch(() => {});
+    await row
+      .locator(".monaco-tl-twistie")
+      .click({ timeout: 3000 })
+      .catch(() => {});
     await wait(300);
   }
   await wait(500);

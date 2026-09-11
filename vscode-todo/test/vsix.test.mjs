@@ -22,7 +22,10 @@ test("VSIX: ships the Node 20 requirement, LSP, core WASM, and runtime dependenc
   ]) {
     assert.ok(contents.includes(file), `VSIX missing ${file}`);
   }
-  assert.equal(contents.some((file) => /(^|\/)target\/|todo-lsp\.exe$|^extension\/bin\//.test(file)), false);
+  assert.equal(
+    contents.some((file) => /(^|\/)target\/|todo-lsp\.exe$|^extension\/bin\//.test(file)),
+    false,
+  );
 });
 
 test("VSIX: packaged Node LSP accepts an initialize request over stdio", async (context) => {
@@ -55,7 +58,9 @@ function request(serverProcess, message) {
       const separator = buffer.indexOf("\r\n\r\n");
       if (separator === -1) return;
 
-      const length = Number(/^Content-Length: (\d+)$/im.exec(buffer.subarray(0, separator).toString())?.[1]);
+      const length = Number(
+        /^Content-Length: (\d+)$/im.exec(buffer.subarray(0, separator).toString())?.[1],
+      );
       const start = separator + 4;
       if (!Number.isSafeInteger(length) || buffer.length < start + length) return;
 

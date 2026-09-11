@@ -82,7 +82,11 @@ class TodoLanguageServer {
       const current = this.#documents.get(params.textDocument.uri)?.document;
       if (!current) return;
 
-      const document = TextDocument.update(current, params.contentChanges, params.textDocument.version);
+      const document = TextDocument.update(
+        current,
+        params.contentChanges,
+        params.textDocument.version,
+      );
       this.storeDocument(document);
       this.publishDiagnostics(document);
       if (this.#pendingRefreshes > 0) {
@@ -97,17 +101,23 @@ class TodoLanguageServer {
     });
     this.connection.onDocumentSymbol((params) => {
       const stored = this.#documents.get(params.textDocument.uri);
-      return stored ? documentSymbols(stored.tree.rootNode, stored.document.getText()).map(symbol) : [];
+      return stored
+        ? documentSymbols(stored.tree.rootNode, stored.document.getText()).map(symbol)
+        : [];
     });
     this.connection.onFoldingRanges((params) => {
       const stored = this.#documents.get(params.textDocument.uri);
-      return stored ? foldingRanges(stored.tree.rootNode, stored.document.getText()).map(foldingRange) : [];
+      return stored
+        ? foldingRanges(stored.tree.rootNode, stored.document.getText()).map(foldingRange)
+        : [];
     });
     this.connection.onDocumentLinks((params) => {
       const text = this.#documents.get(params.textDocument.uri)?.document.getText();
       return text === undefined ? [] : documentLinks(text).map(documentLink);
     });
-    this.connection.languages.semanticTokens.on((params) => this.fullTokens(params.textDocument.uri));
+    this.connection.languages.semanticTokens.on((params) =>
+      this.fullTokens(params.textDocument.uri),
+    );
     this.connection.languages.semanticTokens.onDelta((params) =>
       this.deltaTokens(params.textDocument.uri, params.previousResultId),
     );
@@ -119,7 +129,9 @@ class TodoLanguageServer {
       const formatted = matchEol(text, formatDocument(text));
       return formatted === text ? [] : [{ range: endRange(text), newText: formatted }];
     });
-    this.connection.onExecuteCommand((params) => this.enqueueCommand(params.command, params.arguments));
+    this.connection.onExecuteCommand((params) =>
+      this.enqueueCommand(params.command, params.arguments),
+    );
     this.connection.listen();
   }
 
@@ -168,7 +180,10 @@ class TodoLanguageServer {
     return { resultId, data };
   }
 
-  private deltaTokens(uri: string, previousResultId: string): SemanticTokens | SemanticTokensDelta | null {
+  private deltaTokens(
+    uri: string,
+    previousResultId: string,
+  ): SemanticTokens | SemanticTokensDelta | null {
     const text = this.#documents.get(uri)?.document.getText();
     if (text === undefined) return null;
 
@@ -195,7 +210,10 @@ class TodoLanguageServer {
     return run;
   }
 
-  private async executeCommand(command: string, arguments_: unknown[] | undefined): Promise<undefined> {
+  private async executeCommand(
+    command: string,
+    arguments_: unknown[] | undefined,
+  ): Promise<undefined> {
     const uri = typeof arguments_?.[0] === "string" ? arguments_[0] : undefined;
     if (!uri) return undefined;
 
@@ -222,7 +240,11 @@ class TodoLanguageServer {
   }
 }
 
-function commandResult(command: string, text: string, selection: readonly number[]): string | undefined {
+function commandResult(
+  command: string,
+  text: string,
+  selection: readonly number[],
+): string | undefined {
   const today = new Date();
   switch (command) {
     case "todo-language.toggleDone":
@@ -276,7 +298,11 @@ function tokenEdits(previous: readonly number[], current: readonly number[]) {
 
   let previousEnd = previous.length;
   let currentEnd = current.length;
-  while (previousEnd > start && currentEnd > start && sameToken(previous, previousEnd - 5, current, currentEnd - 5)) {
+  while (
+    previousEnd > start &&
+    currentEnd > start &&
+    sameToken(previous, previousEnd - 5, current, currentEnd - 5)
+  ) {
     previousEnd -= 5;
     currentEnd -= 5;
   }
@@ -285,11 +311,18 @@ function tokenEdits(previous: readonly number[], current: readonly number[]) {
   return [{ start, deleteCount: previousEnd - start, data: current.slice(start, currentEnd) }];
 }
 
-function sameToken(left: readonly number[], leftStart: number, right: readonly number[], rightStart: number): boolean {
+function sameToken(
+  left: readonly number[],
+  leftStart: number,
+  right: readonly number[],
+  rightStart: number,
+): boolean {
   return (
     leftStart + 5 <= left.length &&
     rightStart + 5 <= right.length &&
-    left.slice(leftStart, leftStart + 5).every((value, index) => value === right[rightStart + index])
+    left
+      .slice(leftStart, leftStart + 5)
+      .every((value, index) => value === right[rightStart + index])
   );
 }
 
@@ -298,7 +331,10 @@ function lineSelection(value: unknown): number[] {
   return value.filter((line): line is number => Number.isSafeInteger(line) && line >= 0);
 }
 
-function diagnostic(value: { range: { start: Position; end: Position }; message: string }): Diagnostic {
+function diagnostic(value: {
+  range: { start: Position; end: Position };
+  message: string;
+}): Diagnostic {
   return {
     range: value.range,
     message: value.message,
@@ -323,7 +359,11 @@ function symbol(value: {
   };
 }
 
-function foldingRange(value: { startLine: number; endLine: number; kind: "comment" | "region" }): FoldingRange {
+function foldingRange(value: {
+  startLine: number;
+  endLine: number;
+  kind: "comment" | "region";
+}): FoldingRange {
   return {
     startLine: value.startLine,
     endLine: value.endLine,
@@ -331,7 +371,10 @@ function foldingRange(value: { startLine: number; endLine: number; kind: "commen
   };
 }
 
-function documentLink(value: { range: { start: Position; end: Position }; target: string }): DocumentLink {
+function documentLink(value: {
+  range: { start: Position; end: Position };
+  target: string;
+}): DocumentLink {
   return { range: value.range, target: value.target };
 }
 

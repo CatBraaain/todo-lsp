@@ -17,12 +17,17 @@ function stagePackage(name) {
 
   const source = join(sourceNodeModules, name);
   if (!existsSync(source)) {
-    throw new Error(`Missing runtime dependency ${name}; run npm install in the repository root first.`);
+    throw new Error(
+      `Missing runtime dependency ${name}; run npm install in the repository root first.`,
+    );
   }
 
   staged.add(name);
   const manifest = awaitableJson(join(source, "package.json"));
-  for (const dependency of Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies })) {
+  for (const dependency of Object.keys({
+    ...manifest.dependencies,
+    ...manifest.optionalDependencies,
+  })) {
     stagePackage(dependency);
   }
   cpSync(source, join(targetNodeModules, name), { dereference: true, recursive: true });
