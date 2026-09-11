@@ -1,25 +1,19 @@
 _:
   @just --list --unsorted
 
-build:
-  npm run build
-  cd vscode-todo && npm ci && npm run build
-
+# Typecheck, then run all tests (vscode-todo, workspace packages, tree-sitter grammar).
+# Each workspace package's test script builds itself before running.
 test:
+  npm run typecheck
+  cd vscode-todo && npm run typecheck
   cd vscode-todo && npm test
   npm test
   npm run test:grammar
 
+# Build everything, package the VSIX, verify it, and take SPEC screenshots.
 package:
-  just build
-  cd vscode-todo && npm run package && npm run test:vsix
-
-typecheck:
-  npm run typecheck
-  cd vscode-todo && npm run typecheck
-
-generate-grammar:
   npm run generate:grammar
-
-test-grammar:
-  npm run test:grammar
+  npm run build
+  cd vscode-todo && npm ci && npm run package && npm run test:vsix
+  npm ci --prefix scripts/screenshot
+  bash scripts/screenshot/run.sh
