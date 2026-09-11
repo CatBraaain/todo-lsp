@@ -32,6 +32,7 @@ cat > /tmp/vscode-shot-data/User/settings.json <<'EOF'
   "todo-language.repeatTask.autoRepeat": false,
   "window.newWindowDimensions": "maximized",
   "editor.minimap.enabled": false,
+  "editor.fontSize": 20,
   "json.validate.enable": false,
   "timeline.enabled": false,
   "breadcrumbs.enabled": false
