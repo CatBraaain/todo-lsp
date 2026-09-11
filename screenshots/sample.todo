@@ -2,30 +2,45 @@ Inbox:
     this line should be gray @done(2024-01-01)
     this line should be gray @done(2024-01-01)
     the two gray lines above should be hidden when comment folding is applied
-    the contents of every top-level heading below should be hidden when level-1 folding is applied
-    Project:
-        this line should be plain and the tag light purple @priority(high)
+    the Project block below should be hidden when its heading is folded
+    Project: @priority(high)
+        the heading tag above should be light purple
+        this line should be plain with a light purple tag @waiting
         this line should be gray @done
     dummy
+
 Dates:
-    the start tag should be yellow @start(2024-01-01)
-    the start tag should be light purple @start(2099-12-31)
-    the start tag should be red and underlined @start(not-a-date)
-    the start tag should be red and underlined @start
-    the due tag should be red @due(2024-01-01)
-    the due tag should be light purple @due(2099-12-31)
-    the due tag should be red and underlined @due(not-a-date)
-    the due tag should be red and underlined @due
+    the past start tag should be yellow @start(2024-01-01)
+    the past start tag with a time should be yellow @start(2024-01-01 12:30)
+    the future start tag should be light purple @start(2099-12-31)
+    the invalid start tag should be red and underlined @start(not-a-date)
+    the start tag without an argument should be red and underlined @start
+    the past due tag should be red @due(2024-01-01)
+    the future due tag should be light purple @due(2099-12-31)
+    the invalid due tag should be red and underlined @due(not-a-date)
+    the due tag without an argument should be red and underlined @due
+
 Repeat:
-    the repeat tag should be orange @repeat(0 0 * * *)
-    the repeat tag should be red and underlined @repeat(not-a-cron)
-    the repeat tag should be red and underlined @repeat
+    the valid repeat tag should be orange @repeat(0 0 * * *)
+    the invalid repeat tag should be red and underlined @repeat(not-a-cron)
+    the repeat tag without an argument should be red and underlined @repeat
+
 Tags:
     the queue tag should be yellow @queue(1)
     the queue tag should be light purple @queue(2)
     this line should be gray and italic @cancelled
+    this line should be gray and italic with a date @cancelled(2024-01-01)
     this line should be gray @hide
+    the line should be all gray with no inner colors @done @queue(1)
+
 Decorations:
-    **bold** *italic* `code` <https://example.com> should render as red bold, italic, orange code, and a link
+    the bold span should be red and bold **bold**
+    the italic span should be italic *italic*
+    the code span should be orange `code`
+    the link should render as a link <https://example.com>
+    the adjacent bold and italic spans should keep their colors **bold** *italic*
+    the unclosed bold marker should stay plain **unclosed
+    this done line should be all gray with no inner colors **bold** @done
+
 Archive:
     this line should be plain
