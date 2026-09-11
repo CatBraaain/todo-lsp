@@ -1,29 +1,31 @@
 Inbox:
-    buy milk @done(2024-01-01)
-    call mom @done(2024-01-01)
+    this line should be gray @done(2024-01-01)
+    this line should be gray @done(2024-01-01)
+    the two gray lines above should be hidden when comment folding is applied
+    the contents of every top-level heading below should be hidden when level-1 folding is applied
     Project:
-        draft spec @priority(high)
-        review @done
-    wrap up
+        this line should be plain and the tag light purple @priority(high)
+        this line should be gray @done
+    dummy
 Dates:
-    past start @start(2024-01-01)
-    future start @start(2099-12-31)
-    bad start @start(not-a-date)
-    start without arg @start
-    past due @due(2024-01-01)
-    future due @due(2099-12-31)
-    bad due @due(not-a-date)
-    due without arg @due
+    the start tag should be yellow @start(2024-01-01)
+    the start tag should be light purple @start(2099-12-31)
+    the start tag should be red and underlined @start(not-a-date)
+    the start tag should be red and underlined @start
+    the due tag should be red @due(2024-01-01)
+    the due tag should be light purple @due(2099-12-31)
+    the due tag should be red and underlined @due(not-a-date)
+    the due tag should be red and underlined @due
 Repeat:
-    valid cron @repeat(0 0 * * *)
-    bad cron @repeat(not-a-cron)
-    repeat without arg @repeat
+    the repeat tag should be orange @repeat(0 0 * * *)
+    the repeat tag should be red and underlined @repeat(not-a-cron)
+    the repeat tag should be red and underlined @repeat
 Tags:
-    queue one @queue(1)
-    queue two @queue(2)
-    cancelled task @cancelled
-    hidden task @hide
+    the queue tag should be yellow @queue(1)
+    the queue tag should be light purple @queue(2)
+    this line should be gray and italic @cancelled
+    this line should be gray @hide
 Decorations:
-    **bold** *italic* `code` <https://example.com>
+    **bold** *italic* `code` <https://example.com> should render as red bold, italic, orange code, and a link
 Archive:
-    old task
+    this line should be plain
