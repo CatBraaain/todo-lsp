@@ -10,9 +10,12 @@ test:
   npm test
   npm run test:grammar
 
-# Build the extension, then take SPEC screenshots into screenshots/dist/.
+# Install dependencies, build the workspace packages and extension, then take
+# SPEC screenshots into screenshots/dist/.
 screenshot:
-  cd vscode-todo && npm run build
+  npm ci
+  npm run build
+  cd vscode-todo && npm ci && npm run build
   npm ci --prefix screenshots
   bash screenshots/run.sh
 

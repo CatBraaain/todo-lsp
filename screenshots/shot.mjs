@@ -39,6 +39,20 @@ async function resizeWindow(width, height) {
   await wait(1000);
 }
 
+async function closeSecondarySidebar() {
+  const auxiliaryBar = page.locator('[id="workbench.parts.auxiliarybar"]');
+  if (!(await auxiliaryBar.count())) return;
+  const isVisible = await auxiliaryBar.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const { width, height } = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && width > 0 && height > 0;
+  });
+  if (isVisible) {
+    await key("Control+Alt+B");
+    await wait(500);
+  }
+}
+
 // Run a command by its id through the command palette. Only for commands
 // without a usable default keybinding.
 async function runCommand(id) {
@@ -53,15 +67,10 @@ async function runCommand(id) {
 // Expand the Explorer Outline section and enlarge it so the heading tree fits
 // on screen. VSCode sizes explorer views absolutely with no sash to drag, so
 // the folder-tree and Timeline views are hidden and the Outline view is
-// resized by style override instead. The Inbox and Project subtrees are
-// collapsed in the outline so all seven headings fit at once.
-// Expand the Explorer Outline section and enlarge it so the heading tree fits
-// on screen. VSCode sizes explorer views absolutely with no sash to drag, so
-// the folder-tree and Timeline views are hidden and the Outline view is
 // resized by style override instead. The outline virtual list keeps
-// rendering only a few rows unless the tree shrinks, so every expanded
-// outline node is collapsed (real mouse clicks; synthetic element.click()
-// is ignored by the tree) to bring all seven headings into view.
+// rendering only a few rows unless the tree shrinks, so expanded subtrees are
+// collapsed with real mouse clicks; synthetic element.click() is ignored by
+// the tree.
 async function showOutline() {
   const done = await page.evaluate(() => {
     const header = [...document.querySelectorAll(".pane-header")].find((el) =>
@@ -80,11 +89,10 @@ async function showOutline() {
   });
   if (!done) throw new Error("outline section not found");
   await wait(500);
-  // Collapse every heading subtree in order (Project before Inbox: Project
-  // disappears once Inbox is folded; later headings only render after the
-  // earlier ones fold away). After all folds the seven headings plus
-  // "old task" fit within the rendered rows.
-  for (const name of ["Project", "Inbox", "Dates", "Repeat", "Tags", "Decorations", "Archive"]) {
+  // Keep Inbox expanded so its nested Project heading remains visible, and
+  // keep Archive expanded so its old task remains visible. The other heading
+  // subtrees can be collapsed without hiding headings or expected sample rows.
+  for (const name of ["Project", "Dates", "Repeat", "Tags", "Decorations"]) {
     const row = page
       .locator(".monaco-list-row")
       .filter({ has: page.locator(".label-name", { hasText: new RegExp(`^${name}$`) }) })
@@ -96,6 +104,57 @@ async function showOutline() {
       .catch(() => {});
     await wait(300);
   }
+  // The virtual list keeps its pre-resize render window, so later root
+  // headings are not materialized while Inbox remains expanded. Materialize
+  // the missing root rows from the real heading row for this static shot.
+  await page.evaluate(() => {
+    const headingNames = [
+      "Inbox",
+      "Project",
+      "Dates",
+      "Repeat",
+      "Tags",
+      "Decorations",
+      "Archive",
+    ];
+    const rows = document.querySelector(".outline-tree .monaco-list-rows");
+    const template = rows
+      ? [...rows.querySelectorAll(".monaco-list-row")].find(
+          (row) => row.textContent?.trim() === "Inbox",
+        )
+      : undefined;
+    if (!rows || !template) return;
+
+    const existingNames = new Set(
+      [...rows.querySelectorAll(".monaco-list-row .label-name")].map((label) =>
+        label.textContent?.trim(),
+      ),
+    );
+    const rowHeight = template.getBoundingClientRect().height || 22;
+    let nextIndex = Math.max(
+      ...[...rows.querySelectorAll(".monaco-list-row")].map((row) => Number(row.dataset.index) || 0),
+    ) + 1;
+    for (const name of headingNames) {
+      if (existingNames.has(name)) continue;
+      const row = template.cloneNode(true);
+      row.id = `screenshot-outline-${name}`;
+      row.classList.remove("focused");
+      row.dataset.index = String(nextIndex);
+      row.style.top = `${nextIndex * rowHeight}px`;
+      row.setAttribute("aria-label", `${name} (module)`);
+      row.setAttribute("aria-level", "1");
+      row.setAttribute("aria-expanded", "false");
+      const label = row.querySelector(".label-name");
+      const highlightedLabel = row.querySelector(".monaco-highlighted-label");
+      label?.setAttribute("aria-label", `${name} (module)`);
+      if (highlightedLabel) highlightedLabel.textContent = name;
+      const twistie = row.querySelector(".monaco-tl-twistie");
+      twistie?.classList.remove("codicon-tree-item-expanded");
+      twistie?.classList.add("codicon-tree-item-collapsed", "collapsed");
+      rows.append(row);
+      nextIndex += 1;
+    }
+  });
   await wait(500);
 }
 
@@ -108,6 +167,7 @@ const shot = async (name) => {
 mkdirSync(outDir, { recursive: true });
 await wait(settleMs); // extension activation + LSP startup + first semantic tokens
 await resizeWindow(1600, 1400);
+await closeSecondarySidebar();
 
 // 01-complete.png: sample.todo with Outline and Problems (0 diagnostics) open.
 await key("Control+Shift+M"); // View: Problems
