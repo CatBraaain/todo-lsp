@@ -12,7 +12,7 @@ test:
 
 # Install dependencies, build the workspace packages and extension, then take
 # SPEC screenshots into screenshots/dist/.
-screenshot:
+sc:
   npm ci
   npm run build
   cd vscode-todo && npm ci && npm run build
@@ -24,4 +24,4 @@ package:
   npm run generate:grammar
   npm run build
   cd vscode-todo && npm ci && npm run package && npm run test:vsix
-  just screenshot
+  just sc

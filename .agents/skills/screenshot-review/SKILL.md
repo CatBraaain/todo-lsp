@@ -1,7 +1,7 @@
 ---
 name: screenshot-review
 description: >-
-  todo-lsp の SPEC スクショを vision agent でレビューする。just screenshot で撮影した PNG を
+  todo-lsp の SPEC スクショを vision agent でレビューする。just sc で撮影した PNG を
   SPEC.md §スクショ の撮影対象表と照合し、視覚系振る舞いの適合を判定する。
   「スクショレビュー」「スクショを確認して」「見た目をレビューして」等、スクショの視覚確認を依頼されたときに使う。
   PNG の撮影だけを依頼されたときは使わない。
@@ -11,7 +11,7 @@ description: >-
 
 ## 進め方
 
-1. `just screenshot` を実行し、出力先 `screenshots/dist/` を特定する。終了コード 0 で、撮影対象表に挙げられた全 PNG が出力先へ揃ったことを確認する
+1. `just sc` を実行し、出力先 `screenshots/dist/` を特定する。終了コード 0 で、撮影対象表に挙げられた全 PNG が出力先へ揃ったことを確認する
 2. SPEC.md §スクショ の撮影対象表を読み、PNG ごとの「画面の状態」と「確認する内容」を抽出する。行ごとの視覚期待は screenshots/sample.todo のタスク本文（SPEC.md §サンプル）が正本で、PNG に写っている行のタスク本文がその PNG の確認対象になる。SPEC を唯一の情報源とし、期待の内容を本 skill に複製しない
 3. PNG 1 枚につき vision subagent を 1 回起動する。依頼文には次を含める:
    - PNG の絶対パス
