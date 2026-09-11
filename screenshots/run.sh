@@ -3,8 +3,9 @@
 # The shots are taken over CDP with screenshots/shot.mjs.
 #
 # Usage: screenshots/run.sh [outdir]
-#   outdir defaults to screenshots/dist/<timestamp> (gitignored).
-#   Produces complete.png, highlighting.png, fold-comments.png, fold-headings.png
+#   outdir defaults to screenshots/dist (gitignored).
+#   Produces 01-complete.png, 02-highlighting.png, 03-fold-comments.png,
+#   04-fold-headings.png
 #   as specified by SPEC.md §スクショ, opening screenshots/sample.todo.
 #
 # Notes:
@@ -14,7 +15,7 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${1:-$REPO/screenshots/dist/$(date +%Y%m%d-%H%M%S)}"
+OUT="${1:-$REPO/screenshots/dist}"
 EXTDIR="$REPO/vscode-todo"
 SHOT="$(dirname "$0")/shot.mjs"
 SAMPLE="$(dirname "$0")/sample.todo"

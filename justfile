@@ -10,7 +10,7 @@ test:
   npm test
   npm run test:grammar
 
-# Build the extension, then take SPEC screenshots into screenshots/dist/<timestamp>/.
+# Build the extension, then take SPEC screenshots into screenshots/dist/.
 screenshot:
   cd vscode-todo && npm run build
   npm ci --prefix screenshots
