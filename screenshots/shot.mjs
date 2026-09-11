@@ -108,15 +108,7 @@ async function showOutline() {
   // headings are not materialized while Inbox remains expanded. Materialize
   // the missing root rows from the real heading row for this static shot.
   await page.evaluate(() => {
-    const headingNames = [
-      "Inbox",
-      "Project",
-      "Dates",
-      "Repeat",
-      "Tags",
-      "Decorations",
-      "Archive",
-    ];
+    const headingNames = ["Inbox", "Project", "Dates", "Repeat", "Tags", "Decorations", "Archive"];
     const rows = document.querySelector(".outline-tree .monaco-list-rows");
     const template = rows
       ? [...rows.querySelectorAll(".monaco-list-row")].find(
@@ -131,9 +123,12 @@ async function showOutline() {
       ),
     );
     const rowHeight = template.getBoundingClientRect().height || 22;
-    let nextIndex = Math.max(
-      ...[...rows.querySelectorAll(".monaco-list-row")].map((row) => Number(row.dataset.index) || 0),
-    ) + 1;
+    let nextIndex =
+      Math.max(
+        ...[...rows.querySelectorAll(".monaco-list-row")].map(
+          (row) => Number(row.dataset.index) || 0,
+        ),
+      ) + 1;
     for (const name of headingNames) {
       if (existingNames.has(name)) continue;
       const row = template.cloneNode(true);
