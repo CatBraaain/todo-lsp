@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Launch VSCode (Extension Development Host) under Xvfb and take the SPEC screenshots.
-# The shots are taken over CDP with scripts/screenshot/shot.mjs.
+# The shots are taken over CDP with screenshots/shot.mjs.
 #
-# Usage: scripts/screenshot/run.sh [outdir]
-#   outdir defaults to screenshots/<timestamp> (gitignored).
+# Usage: screenshots/run.sh [outdir]
+#   outdir defaults to screenshots/dist/<timestamp> (gitignored).
 #   Produces complete.png, highlighting.png, fold-comments.png, fold-headings.png
-#   as specified by SPEC.md §スクショ, opening scripts/screenshot/sample.todo.
+#   as specified by SPEC.md §スクショ, opening screenshots/sample.todo.
 #
 # Notes:
 # - WSLg sockets are unreachable from the agent sandbox; Xvfb provides the display.
@@ -13,8 +13,8 @@
 # - user-data-dir/extensions-dir live in /tmp: every run starts from a clean, reproducible state.
 set -u
 
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-OUT="${1:-$REPO/screenshots/$(date +%Y%m%d-%H%M%S)}"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="${1:-$REPO/screenshots/dist/$(date +%Y%m%d-%H%M%S)}"
 EXTDIR="$REPO/vscode-todo"
 SHOT="$(dirname "$0")/shot.mjs"
 SAMPLE="$(dirname "$0")/sample.todo"

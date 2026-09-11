@@ -1,7 +1,7 @@
 // Connect to VSCode over CDP and take the SPEC screenshots.
 // Usage: node shot.mjs <outdir> [--port 9222] [--wait 2000]
 // The shots and their on-screen state are specified by SPEC.md §スクショ (撮影対象);
-// the sample opened in the editor is scripts/screenshot/sample.todo (SPEC.md §サンプル).
+// the sample opened in the editor is screenshots/sample.todo (SPEC.md §サンプル).
 //
 // Commands are issued via default keybindings where possible (Ctrl+Shift+M,
 // Ctrl+J, Ctrl+B, Ctrl+K chords); typing command ids into the palette is
@@ -15,7 +15,7 @@ const argValue = (name) => {
   return index === -1 ? undefined : process.argv[index + 1];
 };
 
-const outDir = process.argv[2] ?? "screenshots";
+const outDir = process.argv[2] ?? "screenshots/dist";
 const port = argValue("--port") ?? "9222";
 const settleMs = Number(argValue("--wait") ?? 2000);
 

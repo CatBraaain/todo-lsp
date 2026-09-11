@@ -11,7 +11,7 @@ description: >-
 
 ## 進め方
 
-1. `just screenshot` を実行し、出力先 `screenshots/<YYYYMMDD-HHMMSS>/` を特定する。終了コード 0 で、撮影対象表に挙げられた全 PNG が出力先へ揃ったことを確認する
+1. `just screenshot` を実行し、出力先 `screenshots/dist/<YYYYMMDD-HHMMSS>/` を特定する。終了コード 0 で、撮影対象表に挙げられた全 PNG が出力先へ揃ったことを確認する
 2. SPEC.md §スクショ の撮影対象表を読み、PNG ごとの期待（「画面の状態」と「確認する節」）を抽出する。SPEC を唯一の情報源とし、期待の内容を本 skill に複製しない
 3. PNG 1 枚につき vision subagent を 1 回起動する。依頼文には次を含める:
    - PNG の絶対パス
