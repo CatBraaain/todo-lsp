@@ -75,26 +75,20 @@ await wait(settleMs); // extension activation + LSP startup + first semantic tok
 await resizeWindow(1600, 1400);
 await closeSecondarySidebar();
 
-// 01-complete.png: sample.todo with Problems (0 diagnostics) open.
-await key("Control+Shift+M"); // View: Problems
-await wait(1500);
-await shot("01-complete.png");
-
-// 02-highlighting.png: editor only, side bar (Ctrl+B) and panel (Ctrl+J) closed.
-await key("Control+J");
-await wait(500);
+// 01-highlighting.png: editor only, side bar (Ctrl+B) closed. The bottom panel
+// starts closed with the fresh user-data-dir.
 await key("Control+B");
 await wait(500);
 await key("Control+Home"); // ensure the editor has focus and show the top
 await wait(1000);
-await shot("02-highlighting.png");
+await shot("01-highlighting.png");
 
-// 03-fold-comments.png: comment (gray block) folds applied (SPEC §コマンド Alt+F).
+// 02-fold-comments.png: comment (gray block) folds applied (SPEC §コマンド Alt+F).
 await runCommand("editor.foldAllBlockComments");
 await wait(1000);
-await shot("03-fold-comments.png");
+await shot("02-fold-comments.png");
 
-// 04-fold-headings.png: every heading fold region collapsed. Fold Level 1
+// 03-fold-headings.png: every heading fold region collapsed. Fold Level 1
 // (Ctrl+K Ctrl+1) folds all top-level regions. Inbox: has no heading fold
 // region by design (SPEC §灰色ブロックの折りたたみ: a heading whose run starts
 // with gray children only gets the comment fold), so its children stay
@@ -105,6 +99,6 @@ await wait(800);
 await key("Control+K");
 await key("Control+1"); // Fold Level 1
 await wait(800);
-await shot("04-fold-headings.png");
+await shot("03-fold-headings.png");
 
 await browser.close();

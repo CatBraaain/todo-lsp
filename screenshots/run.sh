@@ -4,8 +4,8 @@
 #
 # Usage: screenshots/run.sh [outdir]
 #   outdir defaults to screenshots/dist (gitignored).
-#   Produces 01-complete.png, 02-highlighting.png, 03-fold-comments.png,
-#   04-fold-headings.png
+#   Produces 01-highlighting.png, 02-fold-comments.png,
+#   03-fold-headings.png
 #   as specified by SPEC.md §スクショ, opening screenshots/sample.todo.
 #
 # Notes:
