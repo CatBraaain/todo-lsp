@@ -5,13 +5,11 @@ import {
   createTodoParser,
   diagnostics,
   documentLinks,
-  documentSymbols,
   foldingRanges,
   semanticTokens,
   semanticTokensAt,
   semanticTokensLegend,
   type Diagnostic,
-  type DocumentSymbol,
   type FoldingRange,
 } from "../src/index.js";
 
@@ -48,172 +46,6 @@ function absPositions(
 function tokensAt(text: string, now: Date) {
   return absPositions(semanticTokensAt(text, now));
 }
-
-test("outline: sample document symbols", async () => {
-  const parser = await createTodoParser();
-  const symbols = documentSymbols(parser.parse(SAMPLE).rootNode, SAMPLE);
-  assert.equal(symbols.length, 2); // top-level: Inbox, Archive
-
-  const inbox = symbols[0];
-  assert.equal(inbox.name, "Inbox");
-  assert.equal(inbox.kind, "module");
-
-  const inboxChildren = inbox.children!;
-  assert.equal(inboxChildren.length, 4);
-  assert.equal(inboxChildren[0].name, "buy milk");
-  assert.equal(inboxChildren[1].name, "call mom");
-  assert.equal(inboxChildren[2].name, "Project");
-  assert.equal(inboxChildren[2].kind, "module");
-  assert.equal(inboxChildren[3].name, "wrap up");
-
-  const projectChildren = inboxChildren[2].children!;
-  assert.equal(projectChildren.length, 2);
-  assert.equal(projectChildren[0].name, "draft spec");
-  assert.equal(projectChildren[1].name, "review");
-
-  const archive = symbols[1];
-  assert.equal(archive.name, "Archive");
-  assert.equal(archive.children!.length, 1);
-  assert.equal(archive.children![0].name, "old task");
-});
-
-test("outline: symbol ranges are UTF-16 positions", async () => {
-  const text = "タスク見出し:\n  子供のタスク\n";
-  const parser = await createTodoParser();
-  const symbols = documentSymbols(parser.parse(text).rootNode, text);
-  // web-tree-sitter parses strings as UTF-16, so node indices slice the
-  // source directly (the name extraction below) and columns pass through.
-  assert.deepEqual(symbols[0].range.start, { line: 0, character: 0 });
-  // The heading block consumes the trailing newline run: end at row 2 col 0.
-  assert.deepEqual(symbols[0].range.end, { line: 2, character: 0 });
-  assert.deepEqual(symbols[0].selectionRange.start, { line: 0, character: 0 });
-  assert.deepEqual(symbols[0].selectionRange.end, { line: 1, character: 0 });
-  assert.equal(symbols[0].name, "タスク見出し");
-  assert.equal(symbols[0].children![0].name, "子供のタスク");
-});
-
-const symbols = (text: string) =>
-  createTodoParser().then((p) => documentSymbols(p.parse(text).rootNode, text));
-
-const topNames = (symbols_: DocumentSymbol[]) => symbols_.map((s) => s.name);
-
-test("outline: simple task line", async () => {
-  const s = await symbols("buy milk\n");
-  assert.deepEqual(topNames(s), ["buy milk"]);
-  assert.equal(s[0].kind, "string");
-  assert.equal(s[0].children, undefined);
-});
-
-test("outline: tab indentation", async () => {
-  const s = await symbols("A:\n\ttask\n");
-  assert.deepEqual(topNames(s), ["A"]);
-  assert.equal(s[0].kind, "module");
-  assert.deepEqual(
-    s[0].children!.map((c) => c.name),
-    ["task"],
-  );
-  assert.deepEqual(
-    s[0].children!.map((c) => c.kind),
-    ["string"],
-  );
-});
-
-test("outline: blank lines ignored", async () => {
-  const s = await symbols("task a\n\ntask b\n");
-  assert.deepEqual(topNames(s), ["task a", "task b"]);
-});
-
-test("outline: tag-only line yields empty symbol", async () => {
-  const s = await symbols("@done\n");
-  assert.deepEqual(topNames(s), [""]);
-  assert.equal(s[0].kind, "string");
-});
-
-test("outline: colon-only line is a heading symbol", async () => {
-  const s = await symbols(":\n");
-  assert.deepEqual(topNames(s), [""]);
-  assert.equal(s[0].kind, "module");
-});
-
-test("outline: leading tag column on heading is body, on task is not in name", async () => {
-  const s = await symbols("@done Project:\n  @waiting buy milk @queue(1)\n");
-  assert.deepEqual(topNames(s), ["@done Project"]);
-  assert.deepEqual(
-    s[0].children!.map((c) => c.name),
-    ["buy milk"],
-  );
-});
-
-test("outline: colon in body is task not heading", async () => {
-  const s = await symbols("time is 12:30\n");
-  assert.deepEqual(topNames(s), ["time is 12:30"]);
-  assert.equal(s[0].kind, "string");
-});
-
-test("outline: nested headings", async () => {
-  const s = await symbols(
-    "Project:\n  Phase 1:\n    design spec\n    prototype\n  kickoff meeting\n",
-  );
-  assert.deepEqual(topNames(s), ["Project"]);
-  assert.deepEqual(
-    s[0].children!.map((c) => c.name),
-    ["Phase 1", "kickoff meeting"],
-  );
-  assert.deepEqual(
-    s[0].children!.map((c) => c.kind),
-    ["module", "string"],
-  );
-  assert.deepEqual(
-    s[0].children![0].children!.map((c) => c.name),
-    ["design spec", "prototype"],
-  );
-});
-
-test("outline: sibling headings", async () => {
-  const s = await symbols("List A:\n  task 1\nList B:\n  task 2\n");
-  assert.deepEqual(topNames(s), ["List A", "List B"]);
-  assert.deepEqual(
-    s[0].children!.map((c) => c.name),
-    ["task 1"],
-  );
-});
-
-test("outline: heading without body has no children", async () => {
-  const s = await symbols("Inbox:\n");
-  assert.deepEqual(topNames(s), ["Inbox"]);
-  assert.equal(s[0].children, undefined);
-});
-
-test("outline: tag arguments stripped from name", async () => {
-  for (const input of [
-    "task @done\n",
-    "task @done(2024-01-01)\n",
-    "task @done(2024-01-01) @folding @priority(high)\n",
-  ]) {
-    const s = await symbols(input);
-    assert.deepEqual(topNames(s), ["task"], input);
-    assert.equal(s[0].kind, "string", input);
-  }
-});
-
-test("outline: tag edge arguments", async () => {
-  for (const input of [
-    "task @flag()\n",
-    "task @link(http://example.com/path?q=1)\n",
-    "task @note(remember to follow up tomorrow)\n",
-    "task @ref(@other)\n",
-  ]) {
-    const s = await symbols(input);
-    assert.deepEqual(topNames(s), ["task"], input);
-  }
-  // A tag on a heading line does not change the heading name.
-  const s = await symbols("List: @collapsed\n  item one\n");
-  assert.deepEqual(topNames(s), ["List"]);
-  assert.deepEqual(
-    s[0].children!.map((c) => c.name),
-    ["item one"],
-  );
-});
 
 // ----- folding ranges -----
 

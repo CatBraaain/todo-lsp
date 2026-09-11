@@ -25,16 +25,6 @@ export interface DocumentLink {
   target: string;
 }
 
-export type SymbolKind = "module" | "string";
-
-export interface DocumentSymbol {
-  name: string;
-  kind: SymbolKind;
-  range: Range;
-  selectionRange: Range;
-  children: DocumentSymbol[] | undefined;
-}
-
 export type FoldingRangeKind = "comment" | "region";
 
 export interface FoldingRange {

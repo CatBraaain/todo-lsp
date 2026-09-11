@@ -1,93 +1,14 @@
-// Document analysis: outline (document symbols), folding ranges,
-// diagnostics, semantic tokens and document links. Tree-backed features
-// (symbols / folds / diagnostics) walk the tree-sitter parse tree; the rest
-// are line-based scanners over the raw document.
+// Document analysis: folding ranges, diagnostics, semantic tokens and
+// document links. Tree-backed features (folds / diagnostics) walk the
+// tree-sitter parse tree; the rest are line-based scanners over the raw
+// document.
 
 import type { Node } from "web-tree-sitter";
-import { grayOf, isBlank, isHeading, parseLine, textOf, type LineParts } from "./line.js";
-import type { Diagnostic, DocumentSymbol, FoldingRange, Position, Range } from "./lsp-types.js";
+import { grayOf, isBlank, isHeading, parseLine, type LineParts } from "./line.js";
+import type { Diagnostic, FoldingRange } from "./lsp-types.js";
 
 export { semanticTokens, semanticTokensAt, semanticTokensLegend } from "./semantic-tokens.js";
 export { documentLinks } from "./document-links.js";
-
-// === Outline (document symbols) ===
-
-/** Build the outline: walk `source_file`'s named children, skipping
- * zero-width `indent`/`dedent` tokens, mapping `heading_block` -> `module`
- * and `task_line` -> `string`, recursing through `task_block` for nesting.
- * Ranges are UTF-16. */
-export function documentSymbols(root: Node, source: string): DocumentSymbol[] {
-  return symbolsFromChildren(root, source);
-}
-
-function symbolsFromChildren(node: Node, source: string): DocumentSymbol[] {
-  const out: DocumentSymbol[] = [];
-  for (const child of namedChildrenOf(node)) {
-    const symbol = symbolFromNode(child, source);
-    if (symbol) out.push(symbol);
-  }
-  return out;
-}
-
-function symbolFromNode(node: Node, source: string): DocumentSymbol | undefined {
-  switch (node.type) {
-    case "heading_block":
-      return symbolFromHeadingBlock(node, source);
-    case "task_line":
-    case "tag_only_line":
-      return symbolFromTaskLine(node, source);
-    // indent, dedent, task_block (handled by its parent) -> skip
-    default:
-      return undefined;
-  }
-}
-
-/** The physical line text covered by a line node (trailing newlines and
- * blank runs stripped — `_newline` consumes `\n` runs as one token). The
- * node starts after the indent; `parseLine` accepts that slice directly. */
-function lineTextOf(node: Node, source: string): string {
-  return source.slice(node.startIndex, node.endIndex).replace(/[\n\r \t]+$/, "");
-}
-
-function symbolFromHeadingBlock(node: Node, source: string): DocumentSymbol {
-  let headingLine: Node | undefined;
-  let taskBlock: Node | undefined;
-  for (const child of namedChildrenOf(node)) {
-    if (child.type === "heading_line") headingLine = child;
-    else if (child.type === "task_block") taskBlock = child;
-  }
-
-  let name = "";
-  let selectionRange = rangeFromNode(node);
-  if (headingLine) {
-    // The symbol name is the body text (SPEC アウトライン: `:` の前の本文).
-    // The tree's `text` field embeds the leading tag column in the TEXT
-    // token, so re-parse the line instead of using the field.
-    const line = lineTextOf(headingLine, source);
-    name = textOf(parseLine(line), line);
-    selectionRange = rangeFromNode(headingLine);
-  }
-
-  const children = taskBlock ? symbolsFromChildren(taskBlock, source) : [];
-  return {
-    name,
-    kind: "module",
-    range: rangeFromNode(node),
-    selectionRange,
-    children: children.length > 0 ? children : undefined,
-  };
-}
-
-function symbolFromTaskLine(node: Node, source: string): DocumentSymbol {
-  // The symbol name is the body text (SPEC アウトライン: タグを除いた本文).
-  // The tree's `text` field embeds the leading tag column in the TEXT
-  // token, so re-parse the line instead of using the field. Tag-only lines
-  // (no `text` child) get an empty name.
-  const line = lineTextOf(node, source);
-  const name = textOf(parseLine(line), line);
-  const range = rangeFromNode(node);
-  return { name, kind: "string", range, selectionRange: range, children: undefined };
-}
 
 // === Folding ranges ===
 
@@ -297,15 +218,4 @@ function namedChildrenOf(node: Node): Node[] {
     if (child) out.push(child);
   }
   return out;
-}
-
-/** Map a node's start/end points to an LSP `Range`. web-tree-sitter
- * parses JS strings as UTF-16, so `Point.column` is already a UTF-16
- * code-unit offset (SPEC「LSP の位置」) and passes through unchanged. */
-function rangeFromNode(node: Node): Range {
-  return { start: pointOf(node.startPosition), end: pointOf(node.endPosition) };
-}
-
-function pointOf(point: { row: number; column: number }): Position {
-  return { line: point.row, character: point.column };
 }

@@ -2,7 +2,7 @@
   "name": "todo",
   "displayName": "Todo",
   "version": "0.1.0",
-  "description": "Language support for .todo / .tasks files (highlight, outline, folding, diagnostics, commands, formatting, archive, repeat)",
+  "description": "Language support for .todo / .tasks files (highlight, folding, diagnostics, commands, formatting, archive, repeat)",
   "categories": [
     "Programming Languages"
   ],

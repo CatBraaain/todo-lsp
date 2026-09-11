@@ -1,7 +1,7 @@
 # Todo for Visual Studio Code
 
-Language support for `.todo` and `.tasks` files: syntax highlighting, outline,
-folding, diagnostics, commands, formatting, archive, and repeat tasks.
+Language support for `.todo` and `.tasks` files: syntax highlighting, folding,
+diagnostics, commands, formatting, archive, and repeat tasks.
 
 The VSIX ships the Node.js [`@todo-lsp/todo-lsp`](../packages/todo-lsp) server,
 `@todo-lsp/todo-core`, its Tree-sitter WASM grammar, and the server's runtime

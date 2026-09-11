@@ -64,95 +64,6 @@ async function runCommand(id) {
   await wait(1000);
 }
 
-// Expand the Explorer Outline section and enlarge it so the heading tree fits
-// on screen. VSCode sizes explorer views absolutely with no sash to drag, so
-// the folder-tree and Timeline views are hidden and the Outline view is
-// resized by style override instead. The outline virtual list keeps
-// rendering only a few rows unless the tree shrinks, so expanded subtrees are
-// collapsed with real mouse clicks; synthetic element.click() is ignored by
-// the tree.
-async function showOutline() {
-  const done = await page.evaluate(() => {
-    const header = [...document.querySelectorAll(".pane-header")].find((el) =>
-      /outline/i.test(el.textContent ?? ""),
-    );
-    if (!header) return false;
-    if (header.getAttribute("aria-expanded") === "false") header.click();
-    for (const other of document.querySelectorAll(".pane-header")) {
-      const label = other.textContent?.trim() ?? "";
-      if (/^timeline$/i.test(label) || !/outline/i.test(label)) {
-        other.closest(".split-view-view")?.setAttribute("style", "display: none");
-      }
-    }
-    header.closest(".split-view-view")?.setAttribute("style", "top: 0px; height: 1000px");
-    return true;
-  });
-  if (!done) throw new Error("outline section not found");
-  await wait(500);
-  // Keep Inbox expanded so its nested Project heading remains visible, and
-  // keep Archive expanded so its old task remains visible. The other heading
-  // subtrees can be collapsed without hiding headings or expected sample rows.
-  for (const name of ["Project", "Dates", "Repeat", "Tags", "Decorations"]) {
-    const row = page
-      .locator(".monaco-list-row")
-      .filter({ has: page.locator(".label-name", { hasText: new RegExp(`^${name}$`) }) })
-      .first();
-    if (!(await row.count())) continue;
-    await row
-      .locator(".monaco-tl-twistie")
-      .click({ timeout: 3000 })
-      .catch(() => {});
-    await wait(300);
-  }
-  // The virtual list keeps its pre-resize render window, so later root
-  // headings are not materialized while Inbox remains expanded. Materialize
-  // the missing root rows from the real heading row for this static shot.
-  await page.evaluate(() => {
-    const headingNames = ["Inbox", "Project", "Dates", "Repeat", "Tags", "Decorations", "Archive"];
-    const rows = document.querySelector(".outline-tree .monaco-list-rows");
-    const template = rows
-      ? [...rows.querySelectorAll(".monaco-list-row")].find(
-          (row) => row.textContent?.trim() === "Inbox",
-        )
-      : undefined;
-    if (!rows || !template) return;
-
-    const existingNames = new Set(
-      [...rows.querySelectorAll(".monaco-list-row .label-name")].map((label) =>
-        label.textContent?.trim(),
-      ),
-    );
-    const rowHeight = template.getBoundingClientRect().height || 22;
-    let nextIndex =
-      Math.max(
-        ...[...rows.querySelectorAll(".monaco-list-row")].map(
-          (row) => Number(row.dataset.index) || 0,
-        ),
-      ) + 1;
-    for (const name of headingNames) {
-      if (existingNames.has(name)) continue;
-      const row = template.cloneNode(true);
-      row.id = `screenshot-outline-${name}`;
-      row.classList.remove("focused");
-      row.dataset.index = String(nextIndex);
-      row.style.top = `${nextIndex * rowHeight}px`;
-      row.setAttribute("aria-label", `${name} (module)`);
-      row.setAttribute("aria-level", "1");
-      row.setAttribute("aria-expanded", "false");
-      const label = row.querySelector(".label-name");
-      const highlightedLabel = row.querySelector(".monaco-highlighted-label");
-      label?.setAttribute("aria-label", `${name} (module)`);
-      if (highlightedLabel) highlightedLabel.textContent = name;
-      const twistie = row.querySelector(".monaco-tl-twistie");
-      twistie?.classList.remove("codicon-tree-item-expanded");
-      twistie?.classList.add("codicon-tree-item-collapsed", "collapsed");
-      rows.append(row);
-      nextIndex += 1;
-    }
-  });
-  await wait(500);
-}
-
 const shot = async (name) => {
   const path = join(outDir, name);
   await page.screenshot({ path });
@@ -164,11 +75,9 @@ await wait(settleMs); // extension activation + LSP startup + first semantic tok
 await resizeWindow(1600, 1400);
 await closeSecondarySidebar();
 
-// 01-complete.png: sample.todo with Outline and Problems (0 diagnostics) open.
+// 01-complete.png: sample.todo with Problems (0 diagnostics) open.
 await key("Control+Shift+M"); // View: Problems
 await wait(1500);
-await showOutline();
-await wait(500);
 await shot("01-complete.png");
 
 // 02-highlighting.png: editor only, side bar (Ctrl+B) and panel (Ctrl+J) closed.

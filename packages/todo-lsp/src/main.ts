@@ -5,12 +5,10 @@ import {
   DiagnosticSeverity,
   FoldingRangeKind,
   PositionEncodingKind,
-  SymbolKind,
   TextDocumentSyncKind,
   type Connection,
   type Diagnostic,
   type DocumentLink,
-  type DocumentSymbol as LspDocumentSymbol,
   type FoldingRange,
   type InitializeParams,
   type InitializeResult,
@@ -26,7 +24,6 @@ import {
   createTodoParser,
   diagnostics,
   documentLinks,
-  documentSymbols,
   endPosition,
   foldingRanges,
   formatDocument,
@@ -99,12 +96,6 @@ class TodoLanguageServer {
       this.#tokenResults.delete(params.textDocument.uri);
       void this.connection.sendDiagnostics({ uri: params.textDocument.uri, diagnostics: [] });
     });
-    this.connection.onDocumentSymbol((params) => {
-      const stored = this.#documents.get(params.textDocument.uri);
-      return stored
-        ? documentSymbols(stored.tree.rootNode, stored.document.getText()).map(symbol)
-        : [];
-    });
     this.connection.onFoldingRanges((params) => {
       const stored = this.#documents.get(params.textDocument.uri);
       return stored
@@ -143,7 +134,6 @@ class TodoLanguageServer {
       capabilities: {
         positionEncoding: PositionEncodingKind.UTF16,
         textDocumentSync: { openClose: true, change: TextDocumentSyncKind.Full },
-        documentSymbolProvider: true,
         foldingRangeProvider: true,
         documentLinkProvider: { resolveProvider: false },
         documentFormattingProvider: true,
@@ -350,22 +340,6 @@ function diagnostic(value: {
     message: value.message,
     severity: DiagnosticSeverity.Error,
     source: "todo",
-  };
-}
-
-function symbol(value: {
-  name: string;
-  kind: "module" | "string";
-  range: { start: Position; end: Position };
-  selectionRange: { start: Position; end: Position };
-  children: unknown[] | undefined;
-}): LspDocumentSymbol {
-  return {
-    name: value.name,
-    kind: value.kind === "module" ? SymbolKind.Module : SymbolKind.String,
-    range: value.range,
-    selectionRange: value.selectionRange,
-    children: value.children?.map((child) => symbol(child as Parameters<typeof symbol>[0])),
   };
 }
 

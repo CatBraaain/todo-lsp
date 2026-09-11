@@ -148,40 +148,10 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
   );
   assert.deepEqual((diagnostics.params as { diagnostics: unknown[] }).diagnostics, []);
 
-  const symbols = await rpc.request(2, "textDocument/documentSymbol", { textDocument: { uri } });
-  assert.deepEqual(symbols.result, [
-    {
-      name: "😀 task",
-      kind: 15,
-      range: { start: { line: 0, character: 0 }, end: { line: 1, character: 0 } },
-      selectionRange: { start: { line: 0, character: 0 }, end: { line: 1, character: 0 } },
-    },
-    {
-      name: "Project",
-      kind: 2,
-      range: { start: { line: 1, character: 0 }, end: { line: 3, character: 0 } },
-      selectionRange: { start: { line: 1, character: 0 }, end: { line: 2, character: 0 } },
-      children: [
-        {
-          name: "child",
-          kind: 15,
-          range: { start: { line: 2, character: 4 }, end: { line: 3, character: 0 } },
-          selectionRange: { start: { line: 2, character: 4 }, end: { line: 3, character: 0 } },
-        },
-      ],
-    },
-    {
-      name: "😀 see <https://example.com>",
-      kind: 15,
-      range: { start: { line: 3, character: 0 }, end: { line: 4, character: 0 } },
-      selectionRange: { start: { line: 3, character: 0 }, end: { line: 4, character: 0 } },
-    },
-  ]);
-
-  const folds = await rpc.request(3, "textDocument/foldingRange", { textDocument: { uri } });
+  const folds = await rpc.request(2, "textDocument/foldingRange", { textDocument: { uri } });
   assert.deepEqual(folds.result, [{ startLine: 1, endLine: 2, kind: "region" }]);
 
-  const links = await rpc.request(4, "textDocument/documentLink", { textDocument: { uri } });
+  const links = await rpc.request(3, "textDocument/documentLink", { textDocument: { uri } });
   assert.deepEqual(links.result, [
     {
       range: { start: { line: 3, character: 7 }, end: { line: 3, character: 28 } },
@@ -189,7 +159,7 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
     },
   ]);
 
-  const formatted = await rpc.request(5, "textDocument/formatting", {
+  const formatted = await rpc.request(4, "textDocument/formatting", {
     textDocument: { uri },
     options: { tabSize: 4, insertSpaces: true },
   });
@@ -200,7 +170,7 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
     },
   ]);
 
-  const full = await rpc.request(6, "textDocument/semanticTokens/full", { textDocument: { uri } });
+  const full = await rpc.request(5, "textDocument/semanticTokens/full", { textDocument: { uri } });
   const fullResult = full.result as { resultId: string; data: number[] };
   assert.ok(fullResult.resultId);
   assert.ok(fullResult.data.length > 0);
@@ -211,7 +181,7 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
     params: { textDocument: { uri, version: 2 }, contentChanges: [{ text: changedText }] },
   });
   await rpc.next((message) => message.method === "textDocument/publishDiagnostics");
-  const changedDelta = await rpc.request(7, "textDocument/semanticTokens/full/delta", {
+  const changedDelta = await rpc.request(6, "textDocument/semanticTokens/full/delta", {
     textDocument: { uri },
     previousResultId: fullResult.resultId,
   });
@@ -225,7 +195,7 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
   assert.ok(changedDeltaResult.edits && changedDeltaResult.edits.length > 0);
   assert.equal("data" in changedDeltaResult, false);
 
-  const changedFull = await rpc.request(8, "textDocument/semanticTokens/full", {
+  const changedFull = await rpc.request(7, "textDocument/semanticTokens/full", {
     textDocument: { uri },
   });
   const changedFullData = (changedFull.result as { data: number[] }).data;
@@ -234,7 +204,7 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
     changedFullData,
   );
 
-  const knownDelta = await rpc.request(9, "textDocument/semanticTokens/full/delta", {
+  const knownDelta = await rpc.request(8, "textDocument/semanticTokens/full/delta", {
     textDocument: { uri },
     previousResultId: (changedFull.result as { resultId: string }).resultId,
   });
@@ -246,7 +216,7 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
   assert.ok(knownDeltaResult.resultId);
   assert.deepEqual(knownDeltaResult.edits, []);
   assert.equal("data" in knownDeltaResult, false);
-  const unknownDelta = await rpc.request(10, "textDocument/semanticTokens/full/delta", {
+  const unknownDelta = await rpc.request(9, "textDocument/semanticTokens/full/delta", {
     textDocument: { uri },
     previousResultId: "unknown",
   });
@@ -297,7 +267,7 @@ test("stdio adapter serves the advertised Todo LSP features", async (context) =>
   assert.deepEqual((closedDiagnostics.params as { diagnostics: unknown[] }).diagnostics, []);
 
   const exited = new Promise<void>((resolve) => serverProcess.once("exit", () => resolve()));
-  await rpc.request(11, "shutdown", null);
+  await rpc.request(10, "shutdown", null);
   rpc.send({ method: "exit", params: null });
   await exited;
 });

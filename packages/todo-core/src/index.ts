@@ -29,7 +29,6 @@ export {
 } from "./line.js";
 export {
   documentLinks,
-  documentSymbols,
   diagnostics,
   foldingRanges,
   semanticTokens,
@@ -45,7 +44,6 @@ export type {
   // LSP data types (SPEC「LSP の位置」: UTF-16 code units)
   Diagnostic,
   DocumentLink,
-  DocumentSymbol,
   FoldingRange,
   FoldingRangeKind,
   Position,
@@ -53,7 +51,6 @@ export type {
   TextEdit,
   SemanticToken,
   SemanticTokensLegend,
-  SymbolKind,
 } from "./lsp-types.js";
 
 export type TodoTree = Tree;
