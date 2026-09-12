@@ -90,7 +90,8 @@ fi
 # --remote-debugging-port=0: Chromium picks a free port and records it in
 # DevToolsActivePort (first line) once the CDP server is listening.
 PORT_FILE="$DATA_DIR/DevToolsActivePort"
-HOME="$HOME_DIR" DISPLAY=":$DISPLAY_NUM" DBUS_SESSION_BUS_ADDRESS="disabled:" \
+env -u VSCODE_IPC_HOOK_CLI \
+  HOME="$HOME_DIR" DISPLAY=":$DISPLAY_NUM" DBUS_SESSION_BUS_ADDRESS="disabled:" \
   ~/apps/vscode/code --no-sandbox --disable-gpu \
   --user-data-dir="$DATA_DIR" --extensions-dir="$RUN_DIR/ext" \
   --remote-debugging-port=0 --remote-allow-origins='*' \
