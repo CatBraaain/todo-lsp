@@ -87,8 +87,14 @@ function foldingRangeForHeading(node: Node, tones: LineTone[]): FoldingRange | u
   }
 
   const startLine = headingLine.startPosition.row;
-  const endLine = lastLineOfBlock(node);
-  if (endLine === undefined || endLine <= startLine) return undefined;
+  const blockEnd = lastLineOfBlock(node);
+  if (blockEnd === undefined) return undefined;
+  // A region fold ends at the last child content line: trailing blank
+  // lines stay outside the fold, as with gray folds (SPEC 見出しの折りたたみ).
+  // The heading row is never blank, so the walk-back cannot pass it.
+  let endLine = blockEnd;
+  while (endLine > startLine && tones[endLine] === "blank") endLine--;
+  if (endLine <= startLine) return undefined;
   return { startLine, endLine, kind: "region" };
 }
 

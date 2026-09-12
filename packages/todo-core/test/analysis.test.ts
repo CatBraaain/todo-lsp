@@ -87,6 +87,43 @@ test("folding: gray run excludes trailing blank lines", async () => {
   assert.deepEqual(r2, [{ startLine: 0, endLine: 1, kind: "comment" }]);
 });
 
+test("folding: heading region excludes a single trailing blank line", async () => {
+  const r = await folds("A:\n  a\n\nB:\n  b\n");
+  assert.deepEqual(r, [
+    { startLine: 0, endLine: 1, kind: "region" },
+    { startLine: 3, endLine: 4, kind: "region" },
+  ]);
+});
+
+test("folding: heading region excludes every trailing blank line", async () => {
+  const r = await folds("A:\n  a\n\n\nB:\n  b\n");
+  assert.deepEqual(r, [
+    { startLine: 0, endLine: 1, kind: "region" },
+    { startLine: 4, endLine: 5, kind: "region" },
+  ]);
+});
+
+test("folding: heading region is unchanged when the next heading follows directly", async () => {
+  const r = await folds("A:\n  a\nB:\n  b\n");
+  assert.deepEqual(r, [
+    { startLine: 0, endLine: 1, kind: "region" },
+    { startLine: 2, endLine: 3, kind: "region" },
+  ]);
+});
+
+test("folding: heading region at end of file is unchanged", async () => {
+  const r = await folds("A:\n  a\n");
+  assert.deepEqual(r, [{ startLine: 0, endLine: 1, kind: "region" }]);
+});
+
+test("folding: nested heading region excludes the blank before a shallower sibling", async () => {
+  const r = await folds("Outer:\n  a\n  Inner:\n    x\n\n  z\n");
+  assert.deepEqual(r, [
+    { startLine: 0, endLine: 5, kind: "region" },
+    { startLine: 2, endLine: 3, kind: "region" },
+  ]);
+});
+
 test("folding: gray children with leading tag columns", async () => {
   const r = await folds("@done x\n@hide y\nc\n");
   assert.deepEqual(r, [{ startLine: 0, endLine: 1, kind: "comment" }]);
