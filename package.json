@@ -22,6 +22,9 @@
   },
   "allowScripts": {
     "tree-sitter-cli@0.25.10": true,
-    "emsdk@0.4.0": true
+    "emsdk@0.4.0": true,
+    "@vscode/vsce-sign@2.1.0": true,
+    "esbuild@0.24.2": true,
+    "keytar": false
   }
 }
