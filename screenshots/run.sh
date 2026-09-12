@@ -12,7 +12,7 @@
 # - WSLg sockets are unreachable from the agent sandbox; Xvfb provides the display.
 # - HOME points at /tmp so ~/.vscode/argv.json is writable (silences a startup warning).
 # - user-data-dir/extensions-dir live in /tmp: every run starts from a clean, reproducible state.
-set -u
+set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$REPO/screenshots/dist}"
@@ -43,6 +43,10 @@ EOF
 Xvfb :99 -screen 0 1600x1400x24 -nolisten tcp > /tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
 sleep 1
+if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+  echo "xvfb failed to start; see /tmp/xvfb.log" >&2
+  exit 1
+fi
 
 # env -u VSCODE_IPC_HOOK_CLI: otherwise bin/code forwards to the remote-cli of the
 # running Windows VSCode and the launch flags are silently ignored.
@@ -72,11 +76,14 @@ if [ "$UP" = 1 ]; then
     sleep 1
   done
   sleep 8   # extension activation + LSP startup + first semantic tokens
-  node "$SHOT" "$OUT" --wait 3000
-  SHOT_STATUS=$?
+  if node "$SHOT" "$OUT" --wait 3000; then
+    SHOT_STATUS=0
+  else
+    SHOT_STATUS=$?
+  fi
 fi
 
-kill "$VSCODE_PID" "$XVFB_PID" 2>/dev/null
+kill "$VSCODE_PID" "$XVFB_PID" 2>/dev/null || true
 if [ "$UP" = 1 ] && [ "$SHOT_STATUS" = 0 ]; then
   exit 0
 fi
